@@ -2,11 +2,15 @@
 
 This branch adds the database and server-side foundation for the requested platform features. It does not switch the live site until the branch is merged and the Supabase migration/functions are deployed.
 
-## 1. Apply the database migration
+## 1. Apply the database migrations
 
-Run `supabase/migrations/20261119_eventflow_platform_upgrade.sql` in the Supabase SQL Editor after the existing `supabase/schema.sql`.
+For an existing EventFlow database, do **not** re-run the base `supabase/schema.sql`. Apply the additive migrations in this order:
 
-The migration is additive. It adds organisation/event branding fields, optional 5% platform-fee settings, Cashfree order records, event-level helper assignments, a WhatsApp notification outbox and a privacy-limited bib lookup RPC.
+1. `20261119_eventflow_platform_upgrade.sql`
+2. `20261119_eventflow_event_permissions.sql`
+3. `20261119_eventflow_security_and_permissions_hardening.sql`
+
+These migrations preserve existing organisation, event and registration rows. They add organisation/event branding fields, Cashfree order records, event-level helper assignments, a WhatsApp notification outbox and a limited bib lookup RPC. Cashfree is **disabled by default** on every event; enable it only after server secrets are configured and sandbox checkout/webhook tests pass.
 
 ## 2. Cashfree central gateway
 
@@ -69,5 +73,7 @@ Call `supabase.rpc('lookup_participant_bib', { p_event_slug, p_full_name, p_phon
 The PWA manifest, icon and service worker are included. Add the manifest link to `index.html` and register `/sw.js` from the React entry point. Serve the site over HTTPS (Vercel does). The current worker provides a network-first shell fallback; it does not cache private participant data or payment responses.
 
 ## Important before production
+
+The three additive migrations have been applied to the connected EventFlow Supabase project and verified. Existing counts remain 1 organisation, 1 member, 1 event and 1 registration; the new payment/assignment/outbox tables are empty. The Edge Functions have **not** been deployed because required Cashfree and WhatsApp secrets have not yet been supplied/configured, and the function code still needs final hardening and sandbox validation.
 
 This branch is a backend foundation, not a completed production rollout. The existing React registration form and dashboard still need the payment button, brand editor/uploads, QR/certificate branding, volunteer assignment UI, participant bib lookup UI, notification controls, opt-in checkbox and PWA install prompt wired to these additions. Keep Cashfree in sandbox until all flows and webhook signatures are verified.

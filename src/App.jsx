@@ -236,7 +236,7 @@ function Dashboard({ user, onSignOut }) {
   useEffect(() => { if (tab === 'team') loadTeam() }, [tab, org?.id])
   async function addTeamMember(e) {
     e.preventDefault()
-    const { error } = await supabase.rpc('add_organization_member', { p_email: teamEmail.trim(), p_role: teamRole })
+    const { error } = await supabase.rpc('add_organization_member', { p_organization_id: org.id, p_email: teamEmail.trim(), p_role: teamRole })
     if (error) setNotice({ kind: 'error', text: error.message })
     else { setNotice({ kind: 'success', text: `${teamEmail.trim()} added to the workspace.` }); setTeamEmail(''); await loadTeam() }
   }

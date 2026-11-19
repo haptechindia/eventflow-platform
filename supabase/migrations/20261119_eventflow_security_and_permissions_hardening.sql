@@ -3,6 +3,9 @@ begin;
 
 -- Anonymous users only need to read published events; membership checks are for signed-in users.
 drop policy if exists "Public can view published events and members can view all their" on public.events;
+drop policy if exists "Public can view published events and members can view all their events" on public.events;
+drop policy if exists "Public can view published events" on public.events;
+drop policy if exists "Members can view published and workspace events" on public.events;
 create policy "Public can view published events" on public.events
 for select to anon using (status = 'published');
 create policy "Members can view published and workspace events" on public.events

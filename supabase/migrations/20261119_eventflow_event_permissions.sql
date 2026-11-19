@@ -2,6 +2,7 @@
 begin;
 
 drop policy if exists "Organisation members can read registrations" on public.registrations;
+drop policy if exists "Assigned event team can read permitted registrations" on public.registrations;
 create policy "Assigned event team can read permitted registrations" on public.registrations
 for select to authenticated using (public.has_event_permission(event_id, 'view_participants'));
 

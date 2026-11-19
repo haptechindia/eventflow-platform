@@ -171,6 +171,8 @@ function AdminPage() {
 
 function Dashboard({ user, onSignOut }) {
   const [org, setOrg] = useState(null)
+  const [orgs, setOrgs] = useState([])
+  const [selectedOrgId, setSelectedOrgId] = useState('')
   const [role, setRole] = useState('')
   const [events, setEvents] = useState([])
   const [activeEvent, setActiveEvent] = useState(null)
@@ -182,26 +184,37 @@ function Dashboard({ user, onSignOut }) {
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState(null)
   const [orgName, setOrgName] = useState('')
+  const [showOrgForm, setShowOrgForm] = useState(false)
   const [showEventForm, setShowEventForm] = useState(false)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [tab, setTab] = useState('participants')
     const [newEvent, setNewEvent] = useState({ name: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
   const isAdmin = ['owner', 'admin'].includes(role)
-  async function loadWorkspace() {
+  async function loadWorkspace(preferredOrgId = selectedOrgId) {
     setLoading(true)
-    const { data: memberships, error } = await supabase.from('organization_members').select('organization_id, role').eq('user_id', user.id).limit(1)
+    const { data: memberships, error } = await supabase.from('organization_members').select('organization_id, role').eq('user_id', user.id).order('created_at', { ascending: true })
     if (error) { setNotice({ kind: 'error', text: error.message }); setLoading(false); return }
-    if (!memberships?.length) { setOrg(null); setLoading(false); return }
-    const membership = memberships[0]; setRole(membership.role)
-    const [{ data: organization }, { data: eventRows, error: eventErr }] = await Promise.all([
-      supabase.from('organizations').select('*').eq('id', membership.organization_id).single(),
-      supabase.from('events').select('*').eq('organization_id', membership.organization_id).order('created_at', { ascending: false }),
-    ])
-    setOrg(organization || null)
+    if (!memberships?.length) {
+      setOrg(null); setOrgs([]); setSelectedOrgId(''); setRole(''); setEvents([]); setActiveEvent(null); setRegistrations([])
+      setLoading(false); return
+    }
+    const ids = memberships.map(m => m.organization_id)
+    const { data: organizations, error: orgError } = await supabase.from('organizations').select('*').in('id', ids).order('created_at', { ascending: true })
+    if (orgError) { setNotice({ kind: 'error', text: orgError.message }); setLoading(false); return }
+    const availableOrgs = (organizations || []).map(o => ({ ...o, role: memberships.find(m => m.organization_id === o.id)?.role || 'staff' }))
+    const selected = availableOrgs.find(o => o.id === preferredOrgId) || availableOrgs[0]
+    setOrgs(availableOrgs)
+    setSelectedOrgId(selected.id)
+    setOrg(selected)
+    setRole(selected.role)
+    const { data: eventRows, error: eventErr } = await supabase.from('events').select('*').eq('organization_id', selected.id).order('created_at', { ascending: false })
     if (eventErr) setNotice({ kind: 'error', text: eventErr.message })
     setEvents(eventRows || [])
     setActiveEvent(current => (eventRows || []).find(e => e.id === current?.id) || (eventRows || [])[0] || null)
+    setRegistrations([])
+    setTeamMembers([])
+    setTab('participants')
     setLoading(false)
   }
   useEffect(() => { loadWorkspace() }, [user.id])
@@ -231,7 +244,16 @@ function Dashboard({ user, onSignOut }) {
     e.preventDefault()
     const { data, error } = await supabase.rpc('create_organization', { p_name: orgName.trim() })
     if (error) setNotice({ kind: 'error', text: error.message })
-    else { setNotice({ kind: 'success', text: 'Workspace created. You can now publish your first event.' }); await loadWorkspace() }
+    else {
+      setOrgName('')
+      setShowOrgForm(false)
+      setNotice({ kind: 'success', text: 'Organisation created. You are now its owner.' })
+      await loadWorkspace(data)
+    }
+  }
+  async function switchOrganisation(id) {
+    if (!id || id === selectedOrgId) return
+    await loadWorkspace(id)
   }
   async function createEvent(e) {
     e.preventDefault()
@@ -294,9 +316,10 @@ function Dashboard({ user, onSignOut }) {
   const stats = useMemo(() => ({ total: registrations.length, pending: registrations.filter(r => r.payment_status === 'pending').length, confirmed: registrations.filter(r => r.status === 'confirmed').length, checked: registrations.filter(r => r.checked_in_at).length, amount: registrations.filter(r => r.payment_status === 'verified').reduce((s, r) => s + Number(r.amount_due || 0), 0) }), [registrations])
   if (loading) return <div className="page-loading">Loading your workspace…</div>
   if (!org) return <main className="wrap setup-page"><form className="auth-card" onSubmit={createOrg}><div className="auth-mark"><Zap size={22} /></div><div className="eyebrow">FIRST-TIME SETUP</div><h1>Create your organiser workspace.</h1><p>This workspace keeps your organisation's events and participant records separate from other organisers.</p><label>Organisation / brand name<input required maxLength="100" value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="e.g. Natura’s Trust" /></label><Notice kind={notice?.kind}>{notice?.text}</Notice><button className="btn btn-primary btn-full">Create workspace <ArrowRight size={16} /></button><p className="tiny-note">Signed in as {user.email}. You will become the workspace owner.</p></form></main>
-  return <main className="admin-shell wrap"><aside className="admin-sidebar"><div className="workspace-brand"><div className="workspace-avatar">{org.name.slice(0,1).toUpperCase()}</div><div><b>{org.name}</b><small>ORGANISER WORKSPACE</small></div></div><div className="sidebar-section">WORKSPACE</div><button className="side-link active"><LayoutDashboard size={17} /> Overview</button><div className="sidebar-section">YOUR EVENTS <button title="Create event" onClick={() => setShowEventForm(true)}><Plus size={14} /></button></div><div className="side-event-list">{events.map(ev => <button className={`side-event ${activeEvent?.id === ev.id ? 'selected' : ''}`} key={ev.id} onClick={() => { setActiveEvent(ev); setTab('participants') }}><span className="side-event-dot" /> <span>{ev.name}</span><small className={`status-dot ${ev.status}`} /></button>)}</div><button className="btn btn-outline btn-small side-create" onClick={() => setShowEventForm(v => !v)}><Plus size={15} /> New event</button><div className="sidebar-bottom"><div className="account-mini"><span className="account-avatar">{user.email?.slice(0,1).toUpperCase()}</span><span><b>{user.email}</b><small>{role}</small></span></div><button className="side-link signout" onClick={onSignOut}><LogOut size={16} /> Sign out</button></div></aside>
+  return <main className="admin-shell wrap"><aside className="admin-sidebar"><div className="workspace-brand"><div className="workspace-avatar">{org.name.slice(0,1).toUpperCase()}</div><div className="workspace-identity"><b>{org.name}</b><small>ORGANISER WORKSPACE</small></div></div><label className="org-switcher-label">YOUR ORGANISATIONS<select className="org-switcher" value={selectedOrgId} onChange={e => switchOrganisation(e.target.value)}>{orgs.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="btn btn-outline btn-small side-create" onClick={() => { setShowOrgForm(v => !v); setOrgName('') }}><Plus size={15} /> Add organisation</button><div className="sidebar-section">WORKSPACE</div><button className="side-link active"><LayoutDashboard size={17} /> Overview</button><div className="sidebar-section">YOUR EVENTS <button title="Create event" onClick={() => setShowEventForm(true)}><Plus size={14} /></button></div><div className="side-event-list">{events.map(ev => <button className={`side-event ${activeEvent?.id === ev.id ? 'selected' : ''}`} key={ev.id} onClick={() => { setActiveEvent(ev); setTab('participants') }}><span className="side-event-dot" /> <span>{ev.name}</span><small className={`status-dot ${ev.status}`} /></button>)}</div><button className="btn btn-outline btn-small side-create" onClick={() => setShowEventForm(v => !v)}><Plus size={15} /> New event</button><div className="sidebar-bottom"><div className="account-mini"><span className="account-avatar">{user.email?.slice(0,1).toUpperCase()}</span><span><b>{user.email}</b><small>{role}</small></span></div><button className="side-link signout" onClick={onSignOut}><LogOut size={16} /> Sign out</button></div></aside>
   <section className="admin-main"><div className="admin-topline"><div><div className="eyebrow">EVENT OPERATIONS / OVERVIEW</div><h1>Good to see you.</h1><p>Manage registrations, payments and event-day check-ins from one place.</p></div><div className="admin-top-actions"><span className="secure-chip"><ShieldCheck size={14} /> Secure workspace</span><button className="icon-btn" onClick={() => { loadWorkspace(); loadRegistrations(activeEvent) }} title="Refresh"><RefreshCw size={17} /></button></div></div>
     {notice && <Notice kind={notice.kind} onClose={() => setNotice(null)}>{notice.text}</Notice>}
+    {showOrgForm && <form className="create-event-panel" onSubmit={createOrg}><div className="panel-heading"><div><div className="eyebrow">NEW ORGANISATION</div><h2>Create another organisation</h2></div><button type="button" className="icon-btn" onClick={() => setShowOrgForm(false)}><X size={18} /></button></div><div className="form-grid"><label className="span-2">Organisation / brand name <em>*</em><input required maxLength="100" value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="e.g. Natura’s Trust" /></label></div><div className="panel-footer"><span>You will become the owner of this organisation. Its events and team remain separate.</span><button className="btn btn-primary" type="submit">Create organisation <ArrowRight size={16} /></button></div></form>}
     {showEventForm && <form className="create-event-panel" onSubmit={createEvent}><div className="panel-heading"><div><div className="eyebrow">NEW EVENT</div><h2>Create an event page</h2></div><button type="button" className="icon-btn" onClick={() => setShowEventForm(false)}><X size={18} /></button></div><div className="form-grid"><label>Event name <em>*</em><input required value={newEvent.name} onChange={e => setNewEvent(v => ({ ...v, name: e.target.value }))} placeholder="e.g. City Charity Run 2027" /></label><label>Event date<input type="date" value={newEvent.starts_on} onChange={e => setNewEvent(v => ({ ...v, starts_on: e.target.value }))} /></label><label>Venue<input value={newEvent.venue} onChange={e => setNewEvent(v => ({ ...v, venue: e.target.value }))} placeholder="Ground / stadium / location" /></label><label>City<input value={newEvent.city} onChange={e => setNewEvent(v => ({ ...v, city: e.target.value }))} placeholder="City, district" /></label><label>Base fee<input type="number" min="0" value={newEvent.base_fee} onChange={e => setNewEvent(v => ({ ...v, base_fee: e.target.value }))} /></label><label>Currency<select value={newEvent.currency} onChange={e => setNewEvent(v => ({ ...v, currency: e.target.value }))}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option></select></label><label>UPI ID<input value={newEvent.upi_id} onChange={e => setNewEvent(v => ({ ...v, upi_id: e.target.value }))} placeholder="name@bank" /></label><label>Categories & fees <small>Name|Fee|Minimum age|Maximum age — one per line</small><textarea required rows="3" value={newEvent.categories} onChange={e => setNewEvent(v => ({ ...v, categories: e.target.value }))} placeholder={'5 KM|200|7|15\n10 KM|300|16|99'} /></label><label className="span-2">Short event description<textarea rows="2" value={newEvent.description} onChange={e => setNewEvent(v => ({ ...v, description: e.target.value }))} placeholder="Tell participants what this event is about" /></label><label className="span-2">Payment instructions<textarea rows="2" value={newEvent.payment_instructions} onChange={e => setNewEvent(v => ({ ...v, payment_instructions: e.target.value }))} /></label></div><div className="panel-footer"><span>New events start as drafts. You choose when to publish.</span><button className="btn btn-primary" type="submit">Create draft event <ArrowRight size={16} /></button></div></form>}
     {events.length === 0 && !showEventForm ? <div className="empty-state large"><CalendarDays size={30} /><b>Your first event starts here.</b><span>Create an event page, configure categories and fees, then publish it when you're ready.</span><button className="btn btn-primary" onClick={() => setShowEventForm(true)}><Plus size={16} /> Create your first event</button></div> : activeEvent && <>
       <div className="active-event-bar"><div><span className={`status-badge ${activeEvent.status}`}>{activeEvent.status}</span><h2>{activeEvent.name}</h2><div className="active-event-meta"><span><CalendarDays size={14} /> {prettyDate(activeEvent.starts_on)}</span><span><MapPin size={14} /> {[activeEvent.venue, activeEvent.city].filter(Boolean).join(', ') || 'Venue not set'}</span></div></div><div className="event-actions"><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}><ExternalLink size={15} /> Copy registration link</button>{isAdmin && <><button className="btn btn-outline btn-small" onClick={() => toggleRegistration(activeEvent)}>{activeEvent.registration_open ? 'Close registrations' : 'Reopen registrations'}</button><button className={`btn btn-small ${activeEvent.status === 'published' ? 'btn-danger-outline' : 'btn-primary'}`} onClick={() => togglePublish(activeEvent)}>{activeEvent.status === 'published' ? 'Unpublish' : 'Publish event'} <ArrowRight size={15} /></button></>}</div></div>

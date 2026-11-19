@@ -7,6 +7,8 @@ A multi-organisation web application for event organisers. One deployment can ho
 - Public event directory and shareable event registration pages (`/e/:slug`).
 - Organiser sign-up/sign-in with Supabase Auth.
 - Separate organisation workspaces with tenant-scoped database access.
+- One user account can own or join multiple organisations, switch between workspaces, and create additional organisations from the dashboard.
+- Each organisation has its own events, team membership, branding and event-level operations; users only see workspaces they belong to.
 - Workspace team management: add existing accounts as admins or check-in staff.
 - Event creation with description, date, venue, currency, UPI instructions, categories and category fees.
 - Draft/published event state and public registration links / QR codes.

@@ -146,7 +146,7 @@ returns jsonb language plpgsql stable security definer set search_path = ''
 as $$
 declare v_result jsonb;
 begin
-  if length(trim(coalesce(p_full_name,''))) < 2 or length(regexp_replace(coalesce(p_phone,''),'\\D','','g')) < 6 then
+  if length(trim(coalesce(p_full_name,''))) < 2 or length(regexp_replace(coalesce(p_phone,''),'[^0-9]','','g')) < 6 then
     raise exception 'Enter the participant name and registered mobile number.';
   end if;
   select jsonb_build_object(
@@ -161,7 +161,7 @@ begin
   join public.events e on e.id = r.event_id
   where e.slug = p_event_slug
     and lower(trim(r.full_name)) = lower(trim(p_full_name))
-    and regexp_replace(r.phone,'\\D','','g') = regexp_replace(p_phone,'\\D','','g')
+    and regexp_replace(r.phone,'[^0-9]','','g') = regexp_replace(p_phone,'[^0-9]','','g')
   limit 1;
   return coalesce(v_result, jsonb_build_object('found',false));
 end;

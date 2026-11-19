@@ -15,6 +15,7 @@ A multi-organisation web application for event organisers. One deployment can ho
 - Participant registration with duplicate participant protection per event (same email and participant name).
 - Optional private payment-proof upload and transaction reference.
 - Admin payment verification / rejection.
+- Organiser fund claims for successful Cashfree payments after 48 hours, with a 5% deduction and payout reference tracking.
 - Sequential bib allocation on payment approval.
 - Participant search, payment filters and CSV export.
 - QR pass for confirmed participants and camera/manual check-in.

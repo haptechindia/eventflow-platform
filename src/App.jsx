@@ -20,6 +20,106 @@ function WhatsAppIcon({ size = 15 }) {
   )
 }
 
+async function uploadAsset(file, folder = 'logos') {
+  if (!file) return null
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const storagePath = `${folder}/${crypto.randomUUID()}.${ext}`
+  try {
+    const { error } = await supabase.storage.from('event-assets').upload(storagePath, file, { upsert: true, contentType: file.type || 'image/png' })
+    if (error) throw error
+    const { data } = supabase.storage.from('event-assets').getPublicUrl(storagePath)
+    return data.publicUrl
+  } catch (err) {
+    if (file.size < 800 * 1024) {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.readAsDataURL(file)
+      })
+    }
+    throw err
+  }
+}
+
+function OrgBrandModal({ org, onSave, onClose }) {
+  const [logoUrl, setLogoUrl] = useState(org.logo_url || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBusy(true)
+    setError('')
+    try {
+      const url = await uploadAsset(file, 'org-logos')
+      setLogoUrl(url)
+    } catch (err) {
+      setError(err.message || 'Could not upload logo.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function save(e) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const { error: err } = await supabase.from('organizations').update({ logo_url: logoUrl || null }).eq('id', org.id)
+      if (err) throw err
+      onSave({ ...org, logo_url: logoUrl || null })
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Could not save branding.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+        <div className="panel-heading">
+          <div><div className="eyebrow">ORGANISATION BRANDING</div><h2>{org.name} Logo</h2></div>
+          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+        <form onSubmit={save}>
+          <p style={{ fontSize: 11, color: '#667671', margin: '0 0 14px' }}>
+            Upload your organisation logo. If no logo is uploaded, EventFlow displays a default styled brand avatar.
+          </p>
+          <label className="branding-upload-field">
+            Upload logo image (PNG, JPG, WEBP)
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleFile} disabled={busy} />
+          </label>
+          <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--deep)', display: 'grid', gap: 6 }}>
+            Or paste image URL
+            <input value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://..." style={{ padding: 10, border: '1px solid #dfe7e1', borderRadius: 8, fontSize: 11 }} />
+          </label>
+
+          <div className="branding-preview-box">
+            {logoUrl ? (
+              <img src={logoUrl} alt="Logo preview" />
+            ) : (
+              <div className="workspace-avatar" style={{ width: 44, height: 44, fontSize: 18 }}>{org.name.slice(0,1).toUpperCase()}</div>
+            )}
+            <div>
+              <b style={{ fontSize: 11, color: 'var(--deep)' }}>{logoUrl ? 'Custom Logo' : 'Default Brand Avatar'}</b>
+              <small style={{ display: 'block', fontSize: 9, color: '#888' }}>{logoUrl ? 'Active on dashboard & events' : 'No custom logo uploaded yet'}</small>
+              {logoUrl && <button type="button" onClick={() => setLogoUrl('')} style={{ border: 0, background: 'none', color: '#b94e4e', fontSize: 9, cursor: 'pointer', padding: 0, marginTop: 4 }}>Remove logo</button>}
+            </div>
+          </div>
+
+          {error && <Notice kind="error">{error}</Notice>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 18, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-outline btn-small" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary btn-small" disabled={busy}>{busy ? 'Saving…' : 'Save logo'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function getWhatsAppUrl(phone, message) {
   if (!phone) return null
   let digits = String(phone).replace(/\D/g, '')
@@ -56,7 +156,7 @@ function HomePage() {
   useEffect(() => {
     let live = true
     if (!supabase) return
-    supabase.from('events').select('id,name,slug,description,venue,city,starts_on,base_fee,currency,organization_id').eq('status', 'published').order('starts_on', { ascending: true }).then(({ data, error: e }) => {
+    supabase.from('events').select('id,name,slug,description,venue,city,starts_on,base_fee,currency,organization_id,event_logo_url,banner_url,tagline').eq('status', 'published').order('starts_on', { ascending: true }).then(({ data, error: e }) => {
       if (!live) return
       if (e) setError(e.message)
       setEvents(data || [])
@@ -162,7 +262,32 @@ function EventPage() {
   </button>
 )}
 <Link to="/" className="btn btn-outline btn-full" style={{ marginTop: 8 }}>Back to EventFlow <ArrowRight size={16} /></Link></div></main><Footer /></>
-  return <><SiteHeader /><main className="wrap event-page"><Link className="back-link" to="/"><ArrowLeft size={15} /> All events</Link>{error && <Notice kind="error">{error}</Notice>}{event && <div className="event-layout"><section className="event-detail"><span className="event-pill">ONLINE REGISTRATION</span><h1>{event.name}</h1><p className="event-description">{event.description || 'Register here to participate in this event.'}</p><div className="event-detail-meta"><div><CalendarDays /><span><small>EVENT DATE</small><b>{prettyDate(event.starts_on)}</b></span></div><div><MapPin /><span><small>VENUE</small><b>{[event.venue, event.city].filter(Boolean).join(', ') || 'To be announced'}</b></span></div></div><div className="event-info-panel"><h3>Categories & fees</h3>{categories.map(c => <div className="category-row" key={c.name}><span>{c.name}</span><b>{money(c.fee ?? event.base_fee, event.currency)}</b></div>)}{event.payment_instructions && <div className="payment-instructions"><b>Payment instructions</b><p>{event.payment_instructions}</p>{event.upi_id && <span className="upi-chip">UPI ID: {event.upi_id}</span>}</div>}</div><div className="privacy-note"><ShieldCheck size={17} /><span>Your registration details are shared only with this event's organiser and are not displayed to other participants.</span></div></section>
+  return <><SiteHeader /><main className="wrap event-page"><Link className="back-link" to="/"><ArrowLeft size={15} /> All events</Link>{error && <Notice kind="error">{error}</Notice>}{event && <div className="event-layout"><section className="event-detail">
+  {event.banner_url ? (
+    <div className="event-hero-banner"><img src={event.banner_url} alt={event.name} /></div>
+  ) : (
+    <div className="event-hero-banner default-banner">
+      <div className="default-banner-content">
+        <span className="default-banner-tag">OFFICIAL EVENT</span>
+        <h2>{event.name}</h2>
+      </div>
+    </div>
+  )}
+  <div className="event-title-row">
+    {event.event_logo_url ? (
+      <img src={event.event_logo_url} alt={event.name} className="event-main-logo" />
+    ) : (
+      <div className="event-main-logo default-logo">
+        <Activity size={26} />
+      </div>
+    )}
+    <div>
+      <span className="event-pill">ONLINE REGISTRATION</span>
+      <h1>{event.name}</h1>
+      {event.tagline && <p className="event-tagline">{event.tagline}</p>}
+    </div>
+  </div>
+  <p className="event-description">{event.description || 'Register here to participate in this event.'}</p><div className="event-detail-meta"><div><CalendarDays /><span><small>EVENT DATE</small><b>{prettyDate(event.starts_on)}</b></span></div><div><MapPin /><span><small>VENUE</small><b>{[event.venue, event.city].filter(Boolean).join(', ') || 'To be announced'}</b></span></div></div><div className="event-info-panel"><h3>Categories & fees</h3>{categories.map(c => <div className="category-row" key={c.name}><span>{c.name}</span><b>{money(c.fee ?? event.base_fee, event.currency)}</b></div>)}{event.payment_instructions && <div className="payment-instructions"><b>Payment instructions</b><p>{event.payment_instructions}</p>{event.upi_id && <span className="upi-chip">UPI ID: {event.upi_id}</span>}</div>}</div><div className="privacy-note"><ShieldCheck size={17} /><span>Your registration details are shared only with this event's organiser and are not displayed to other participants.</span></div></section>
     <form className="registration-form" onSubmit={register}><div className="form-heading"><div><div className="eyebrow">PARTICIPANT FORM</div><h2>{event.registration_open ? 'Register now' : 'Registration closed'}</h2></div><span className="required-label">* Required</span></div>{!event.registration_open && <Notice kind="info">Registration for this event is currently closed. Please contact the organiser for more information.</Notice>}<label>Full name <em>*</em><input required maxLength="120" value={form.full_name} onChange={e => setField('full_name', e.target.value)} placeholder="Enter participant name" /></label><div className="form-row"><label>Email address <em>*</em><input type="email" required maxLength="180" value={form.email} onChange={e => setField('email', e.target.value)} placeholder="name@example.com" /></label><label>Mobile number <em>*</em><input type="tel" required maxLength="20" value={form.phone} onChange={e => setField('phone', e.target.value)} placeholder="10-digit mobile number" /></label></div><label>Event category <em>*</em><select required value={form.category} onChange={e => setField('category', e.target.value)}>{categories.map(c => <option key={c.name} value={c.name}>{c.name} — {money(c.fee ?? event.base_fee, event.currency)}</option>)}</select></label><div className="form-row"><label>Date of birth {(chosen?.minAge !== undefined || chosen?.maxAge !== undefined) && <em>*</em>}<input type="date" required={chosen?.minAge !== undefined || chosen?.maxAge !== undefined} value={form.date_of_birth} onChange={e => setField('date_of_birth', e.target.value)} /></label><label>Emergency contact<input type="tel" maxLength="20" value={form.emergency_contact} onChange={e => setField('emergency_contact', e.target.value)} placeholder="Optional" /></label></div>{event.cashfree_enabled && (
   <div className="payment-method-selector">
     <button type="button" className={`payment-method-btn ${paymentMethod === 'online' ? 'active' : ''}`} onClick={() => setPaymentMethod('online')}>
@@ -252,7 +377,9 @@ function Dashboard({ user, onSignOut }) {
   const [claimBusy, setClaimBusy] = useState(false)
   const [transferRefs, setTransferRefs] = useState({})
   const [whatsappModal, setWhatsappModal] = useState(false)
-    const [newEvent, setNewEvent] = useState({ name: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
+  const [showBrandModal, setShowBrandModal] = useState(false)
+  const [eventBrandBusy, setEventBrandBusy] = useState(false)
+    const [newEvent, setNewEvent] = useState({ name: '', tagline: '', event_logo_url: '', banner_url: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
   const isAdmin = ['owner', 'admin'].includes(role)
   async function loadWorkspace(preferredOrgId = selectedOrgId) {
     setLoading(true)
@@ -364,7 +491,7 @@ function Dashboard({ user, onSignOut }) {
     if (!slug) { setNotice({ kind: 'error', text: 'Enter an event name containing letters or numbers.' }); return }
     const { data, error } = await supabase.from('events').insert({
       organization_id: org.id, name: newEvent.name.trim(), slug, description: newEvent.description.trim(), venue: newEvent.venue.trim(), city: newEvent.city.trim(), starts_on: newEvent.starts_on || null,
-      base_fee: Number(newEvent.base_fee || 0), currency: newEvent.currency, upi_id: newEvent.upi_id.trim() || null, payment_instructions: newEvent.payment_instructions.trim() || null,
+      base_fee: Number(newEvent.base_fee || 0), currency: newEvent.currency, upi_id: newEvent.upi_id.trim() || null, payment_instructions: newEvent.payment_instructions.trim() || null, tagline: newEvent.tagline.trim(), event_logo_url: newEvent.event_logo_url.trim() || null, banner_url: newEvent.banner_url.trim() || null,
       categories: cats, status: 'draft', registration_open: true, cashfree_enabled: Boolean(newEvent.cashfree_enabled),
     }).select().single()
     if (error) setNotice({ kind: 'error', text: error.message })
@@ -424,11 +551,35 @@ function Dashboard({ user, onSignOut }) {
   const stats = useMemo(() => ({ total: registrations.length, pending: registrations.filter(r => r.payment_status === 'pending').length, confirmed: registrations.filter(r => r.status === 'confirmed').length, checked: registrations.filter(r => r.checked_in_at).length, amount: registrations.filter(r => r.payment_status === 'verified').reduce((s, r) => s + Number(r.amount_due || 0), 0) }), [registrations])
   if (loading) return <div className="page-loading">Loading your workspace…</div>
   if (!org) return <main className="wrap setup-page"><form className="auth-card" onSubmit={createOrg}><div className="auth-mark"><Zap size={22} /></div><div className="eyebrow">FIRST-TIME SETUP</div><h1>Create your organiser workspace.</h1><p>This workspace keeps your organisation's events and participant records separate from other organisers.</p><label>Organisation / brand name<input required maxLength="100" value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="e.g. Natura’s Trust" /></label><Notice kind={notice?.kind}>{notice?.text}</Notice><button className="btn btn-primary btn-full">Create workspace <ArrowRight size={16} /></button><p className="tiny-note">Signed in as {user.email}. You will become the workspace owner.</p></form></main>
-  return <main className="admin-shell wrap"><aside className="admin-sidebar"><div className="workspace-brand"><div className="workspace-avatar">{org.name.slice(0,1).toUpperCase()}</div><div className="workspace-identity"><b>{org.name}</b><small>ORGANISER WORKSPACE</small></div></div><label className="org-switcher-label">YOUR ORGANISATIONS<select className="org-switcher" value={selectedOrgId} onChange={e => switchOrganisation(e.target.value)}>{orgs.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="btn btn-outline btn-small side-create" onClick={() => { setShowOrgForm(v => !v); setOrgName('') }}><Plus size={15} /> Add organisation</button><div className="sidebar-section">WORKSPACE</div><button className="side-link active"><LayoutDashboard size={17} /> Overview</button><div className="sidebar-section">YOUR EVENTS <button title="Create event" onClick={() => setShowEventForm(true)}><Plus size={14} /></button></div><div className="side-event-list">{events.map(ev => <button className={`side-event ${activeEvent?.id === ev.id ? 'selected' : ''}`} key={ev.id} onClick={() => { setActiveEvent(ev); setTab('participants') }}><span className="side-event-dot" /> <span>{ev.name}</span><small className={`status-dot ${ev.status}`} /></button>)}</div><button className="btn btn-outline btn-small side-create" onClick={() => setShowEventForm(v => !v)}><Plus size={15} /> New event</button><div className="sidebar-bottom"><div className="account-mini"><span className="account-avatar">{user.email?.slice(0,1).toUpperCase()}</span><span><b>{user.email}</b><small>{role}</small></span></div><button className="side-link signout" onClick={onSignOut}><LogOut size={16} /> Sign out</button></div></aside>
+  return <main className="admin-shell wrap"><aside className="admin-sidebar"><div className="workspace-brand">
+  {org.logo_url ? (
+    <img src={org.logo_url} alt={org.name} className="workspace-avatar-img" />
+  ) : (
+    <div className="workspace-avatar">{org.name.slice(0,1).toUpperCase()}</div>
+  )}
+  <div className="workspace-identity">
+    <b>{org.name}</b>
+    <small>ORGANISER WORKSPACE</small>
+  </div>
+</div>
+{isAdmin && (
+  <button className="side-brand-btn" onClick={() => setShowBrandModal(true)}>
+    <FileImage size={12} /> Customise logo
+  </button>
+)}<label className="org-switcher-label">YOUR ORGANISATIONS<select className="org-switcher" value={selectedOrgId} onChange={e => switchOrganisation(e.target.value)}>{orgs.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="btn btn-outline btn-small side-create" onClick={() => { setShowOrgForm(v => !v); setOrgName('') }}><Plus size={15} /> Add organisation</button><div className="sidebar-section">WORKSPACE</div><button className="side-link active"><LayoutDashboard size={17} /> Overview</button><div className="sidebar-section">YOUR EVENTS <button title="Create event" onClick={() => setShowEventForm(true)}><Plus size={14} /></button></div><div className="side-event-list">{events.map(ev => <button className={`side-event ${activeEvent?.id === ev.id ? 'selected' : ''}`} key={ev.id} onClick={() => { setActiveEvent(ev); setTab('participants') }}><span className="side-event-dot" /> <span>{ev.name}</span><small className={`status-dot ${ev.status}`} /></button>)}</div><button className="btn btn-outline btn-small side-create" onClick={() => setShowEventForm(v => !v)}><Plus size={15} /> New event</button><div className="sidebar-bottom"><div className="account-mini"><span className="account-avatar">{user.email?.slice(0,1).toUpperCase()}</span><span><b>{user.email}</b><small>{role}</small></span></div><button className="side-link signout" onClick={onSignOut}><LogOut size={16} /> Sign out</button></div></aside>
   <section className="admin-main"><div className="admin-topline"><div><div className="eyebrow">EVENT OPERATIONS / OVERVIEW</div><h1>Good to see you.</h1><p>Manage registrations, payments and event-day check-ins from one place.</p></div><div className="admin-top-actions"><span className="secure-chip"><ShieldCheck size={14} /> Secure workspace</span><button className="icon-btn" onClick={() => { loadWorkspace(); loadRegistrations(activeEvent) }} title="Refresh"><RefreshCw size={17} /></button></div></div>
     {notice && <Notice kind={notice.kind} onClose={() => setNotice(null)}>{notice.text}</Notice>}
     {showOrgForm && <form className="create-event-panel" onSubmit={createOrg}><div className="panel-heading"><div><div className="eyebrow">NEW ORGANISATION</div><h2>Create another organisation</h2></div><button type="button" className="icon-btn" onClick={() => setShowOrgForm(false)}><X size={18} /></button></div><div className="form-grid"><label className="span-2">Organisation / brand name <em>*</em><input required maxLength="100" value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="e.g. Natura’s Trust" /></label></div><div className="panel-footer"><span>You will become the owner of this organisation. Its events and team remain separate.</span><button className="btn btn-primary" type="submit">Create organisation <ArrowRight size={16} /></button></div></form>}
-    {showEventForm && <form className="create-event-panel" onSubmit={createEvent}><div className="panel-heading"><div><div className="eyebrow">NEW EVENT</div><h2>Create an event page</h2></div><button type="button" className="icon-btn" onClick={() => setShowEventForm(false)}><X size={18} /></button></div><div className="form-grid"><label>Event name <em>*</em><input required value={newEvent.name} onChange={e => setNewEvent(v => ({ ...v, name: e.target.value }))} placeholder="e.g. City Charity Run 2027" /></label><label>Event date<input type="date" value={newEvent.starts_on} onChange={e => setNewEvent(v => ({ ...v, starts_on: e.target.value }))} /></label><label>Venue<input value={newEvent.venue} onChange={e => setNewEvent(v => ({ ...v, venue: e.target.value }))} placeholder="Ground / stadium / location" /></label><label>City<input value={newEvent.city} onChange={e => setNewEvent(v => ({ ...v, city: e.target.value }))} placeholder="City, district" /></label><label>Base fee<input type="number" min="0" value={newEvent.base_fee} onChange={e => setNewEvent(v => ({ ...v, base_fee: e.target.value }))} /></label><label>Currency<select value={newEvent.currency} onChange={e => setNewEvent(v => ({ ...v, currency: e.target.value }))}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option></select></label><label>UPI ID<input value={newEvent.upi_id} onChange={e => setNewEvent(v => ({ ...v, upi_id: e.target.value }))} placeholder="name@bank" /></label><label>Categories & fees <small>Name|Fee|Minimum age|Maximum age — one per line</small><textarea required rows="3" value={newEvent.categories} onChange={e => setNewEvent(v => ({ ...v, categories: e.target.value }))} placeholder={'5 KM|200|7|15\n10 KM|300|16|99'} /></label><label className="span-2">Short event description<textarea rows="2" value={newEvent.description} onChange={e => setNewEvent(v => ({ ...v, description: e.target.value }))} placeholder="Tell participants what this event is about" /></label><label className="span-2">Payment instructions<textarea rows="2" value={newEvent.payment_instructions} onChange={e => setNewEvent(v => ({ ...v, payment_instructions: e.target.value }))} /></label><label className="span-2" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}><input type="checkbox" checked={Boolean(newEvent.cashfree_enabled)} onChange={e => setNewEvent(v => ({ ...v, cashfree_enabled: e.target.checked }))} /> <span>Enable Cashfree online checkout for this event (UPI, Cards, Netbanking)</span></label></div><div className="panel-footer"><span>New events start as drafts. You choose when to publish.</span><button className="btn btn-primary" type="submit">Create draft event <ArrowRight size={16} /></button></div></form>}
+    {showEventForm && <form className="create-event-panel" onSubmit={createEvent}><div className="panel-heading"><div><div className="eyebrow">NEW EVENT</div><h2>Create an event page</h2></div><button type="button" className="icon-btn" onClick={() => setShowEventForm(false)}><X size={18} /></button></div><div className="form-grid"><label>Event name <em>*</em><input required value={newEvent.name} onChange={e => setNewEvent(v => ({ ...v, name: e.target.value }))} placeholder="e.g. City Charity Run 2027" /></label>
+<label>Event tagline <small>Optional short slogan</small><input value={newEvent.tagline} onChange={e => setNewEvent(v => ({ ...v, tagline: e.target.value }))} placeholder="e.g. Run for a greener tomorrow" /></label>
+<label className="branding-upload-field">Event logo picture <small>PNG/JPG or paste link</small>
+  <input type="file" accept="image/*" onChange={async e => { const file = e.target.files?.[0]; if (file) { try { const url = await uploadAsset(file, 'event-logos'); setNewEvent(v => ({ ...v, event_logo_url: url })) } catch(err) { alert(err.message) } } }} />
+  <input value={newEvent.event_logo_url} onChange={e => setNewEvent(v => ({ ...v, event_logo_url: e.target.value }))} placeholder="Or paste logo URL" style={{ marginTop: 4 }} />
+</label>
+<label className="branding-upload-field">Event cover banner <small>Header banner picture</small>
+  <input type="file" accept="image/*" onChange={async e => { const file = e.target.files?.[0]; if (file) { try { const url = await uploadAsset(file, 'event-banners'); setNewEvent(v => ({ ...v, banner_url: url })) } catch(err) { alert(err.message) } } }} />
+  <input value={newEvent.banner_url} onChange={e => setNewEvent(v => ({ ...v, banner_url: e.target.value }))} placeholder="Or paste banner image URL" style={{ marginTop: 4 }} />
+</label><label>Event date<input type="date" value={newEvent.starts_on} onChange={e => setNewEvent(v => ({ ...v, starts_on: e.target.value }))} /></label><label>Venue<input value={newEvent.venue} onChange={e => setNewEvent(v => ({ ...v, venue: e.target.value }))} placeholder="Ground / stadium / location" /></label><label>City<input value={newEvent.city} onChange={e => setNewEvent(v => ({ ...v, city: e.target.value }))} placeholder="City, district" /></label><label>Base fee<input type="number" min="0" value={newEvent.base_fee} onChange={e => setNewEvent(v => ({ ...v, base_fee: e.target.value }))} /></label><label>Currency<select value={newEvent.currency} onChange={e => setNewEvent(v => ({ ...v, currency: e.target.value }))}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option></select></label><label>UPI ID<input value={newEvent.upi_id} onChange={e => setNewEvent(v => ({ ...v, upi_id: e.target.value }))} placeholder="name@bank" /></label><label>Categories & fees <small>Name|Fee|Minimum age|Maximum age — one per line</small><textarea required rows="3" value={newEvent.categories} onChange={e => setNewEvent(v => ({ ...v, categories: e.target.value }))} placeholder={'5 KM|200|7|15\n10 KM|300|16|99'} /></label><label className="span-2">Short event description<textarea rows="2" value={newEvent.description} onChange={e => setNewEvent(v => ({ ...v, description: e.target.value }))} placeholder="Tell participants what this event is about" /></label><label className="span-2">Payment instructions<textarea rows="2" value={newEvent.payment_instructions} onChange={e => setNewEvent(v => ({ ...v, payment_instructions: e.target.value }))} /></label><label className="span-2" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}><input type="checkbox" checked={Boolean(newEvent.cashfree_enabled)} onChange={e => setNewEvent(v => ({ ...v, cashfree_enabled: e.target.checked }))} /> <span>Enable Cashfree online checkout for this event (UPI, Cards, Netbanking)</span></label></div><div className="panel-footer"><span>New events start as drafts. You choose when to publish.</span><button className="btn btn-primary" type="submit">Create draft event <ArrowRight size={16} /></button></div></form>}
     {events.length === 0 && !showEventForm ? <div className="empty-state large"><CalendarDays size={30} /><b>Your first event starts here.</b><span>Create an event page, configure categories and fees, then publish it when you're ready.</span><button className="btn btn-primary" onClick={() => setShowEventForm(true)}><Plus size={16} /> Create your first event</button></div> : activeEvent && <>
       <div className="active-event-bar"><div><span className={`status-badge ${activeEvent.status}`}>{activeEvent.status}</span><h2>{activeEvent.name}</h2><div className="active-event-meta"><span><CalendarDays size={14} /> {prettyDate(activeEvent.starts_on)}</span><span><MapPin size={14} /> {[activeEvent.venue, activeEvent.city].filter(Boolean).join(', ') || 'Venue not set'}</span></div></div><div className="event-actions"><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}><ExternalLink size={15} /> Copy registration link</button>{isAdmin && <><button className={`btn btn-small ${activeEvent.cashfree_enabled ? 'btn-outline' : 'btn-quiet'}`} onClick={() => toggleCashfree(activeEvent)} title="Toggle online payments for this event"><Wallet size={14} /> Cashfree: {activeEvent.cashfree_enabled ? 'Active' : 'Off'}</button><button className="btn btn-outline btn-small" onClick={() => toggleRegistration(activeEvent)}>{activeEvent.registration_open ? 'Close registrations' : 'Reopen registrations'}</button><button className={`btn btn-small ${activeEvent.status === 'published' ? 'btn-danger-outline' : 'btn-primary'}`} onClick={() => togglePublish(activeEvent)}>{activeEvent.status === 'published' ? 'Unpublish' : 'Publish event'} <ArrowRight size={15} /></button></>}</div></div>
       <div className="stats-grid"><StatCard icon={<Users />} label="Total registrations" value={stats.total} detail="All submitted participants" /><StatCard icon={<Clock3 />} label="Awaiting verification" value={stats.pending} detail="Payment review required" /><StatCard icon={<BadgeCheck />} label="Confirmed participants" value={stats.confirmed} detail="Payment verified" /><StatCard icon={<Wallet />} label="Verified collection" value={money(stats.amount, activeEvent.currency)} detail="Based on verified payments" /></div>
@@ -450,8 +601,79 @@ function Dashboard({ user, onSignOut }) {
 )}
 {row.payment_status === 'pending' && isAdmin && <><button className="approve-btn" title="Verify payment" onClick={() => paymentAction(row, 'approve')}><Check size={15} /></button><button className="reject-btn" title="Reject registration" onClick={() => paymentAction(row, 'reject')}><X size={15} /></button></>}{row.status === 'confirmed' && <QRCodeSVG value={row.registration_code} size={42} level="M" />}</div></td></tr>)}</tbody></table></div> : <div className="table-empty"><Users size={24} /><b>No matching registrations</b><span>Participant entries will appear here when someone submits the public event form.</span></div>}</section>}
       {tab === 'checkin' && <CheckinPanel event={activeEvent} registrations={registrations} onScan={checkIn} />}
-      {tab === 'event' && <div className="event-share-panel"><div className="event-share-text"><div className="eyebrow">PUBLIC REGISTRATION PAGE</div><h3>Share your event with participants.</h3><p>Anyone with this link can view the published event and submit a registration. Draft events are not publicly accessible.</p><div className="share-url">{window.location.origin}/e/{activeEvent.slug}</div><button className="btn btn-primary" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}>Copy event link <ExternalLink size={15} /></button></div><div className="share-qr"><QRCodeSVG value={`${window.location.origin}/e/${activeEvent.slug}`} size={156} level="H" /><small>SCAN TO REGISTER</small></div></div>}{tab === 'team' && <TeamPanel members={teamMembers} loading={teamLoading} email={teamEmail} setEmail={setTeamEmail} role={teamRole} setRole={setTeamRole} onSubmit={addTeamMember} />}{tab === 'fundclaims' && <FundClaimsPanel event={activeEvent} events={events} claims={fundClaims} summary={claimSummary} loading={claimsLoading} busy={claimBusy} transferRefs={transferRefs} setTransferRefs={setTransferRefs} onClaim={requestFundClaim} onUpdate={updateFundClaim} />}
+      {tab === 'event' && <>
+  <div className="event-share-panel"><div className="event-share-text"><div className="eyebrow">PUBLIC REGISTRATION PAGE</div><h3>Share your event with participants.</h3><p>Anyone with this link can view the published event and submit a registration. Draft events are not publicly accessible.</p><div className="share-url">{window.location.origin}/e/{activeEvent.slug}</div><button className="btn btn-primary" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}>Copy event link <ExternalLink size={15} /></button></div><div className="share-qr"><QRCodeSVG value={`${window.location.origin}/e/${activeEvent.slug}`} size={156} level="H" /><small>SCAN TO REGISTER</small></div></div>
+
+  <div className="data-panel" style={{ marginTop: 16, padding: 20 }}>
+    <div className="data-panel-head" style={{ padding: '0 0 14px' }}>
+      <div>
+        <h3>Event Pictures & Branding</h3>
+        <p>Upload a custom cover banner and event logo. If left empty, EventFlow displays modern default graphics.</p>
+      </div>
+      <span className="secure-chip"><ShieldCheck size={13} /> Organiser Branding</span>
+    </div>
+
+    <div className="form-grid">
+      <div className="branding-upload-field">
+        <span>Event Logo</span>
+        <input type="file" accept="image/*" disabled={eventBrandBusy} onChange={async e => {
+          const file = e.target.files?.[0]; if (!file) return;
+          try {
+            setEventBrandBusy(true);
+            const url = await uploadAsset(file, 'event-logos');
+            const { error: err } = await supabase.from('events').update({ event_logo_url: url }).eq('id', activeEvent.id);
+            if (err) throw err;
+            setActiveEvent(prev => ({ ...prev, event_logo_url: url }));
+            setEvents(prev => prev.map(ev => ev.id === activeEvent.id ? { ...ev, event_logo_url: url } : ev));
+            setNotice({ kind: 'success', text: 'Event logo updated.' });
+          } catch(err) { setNotice({ kind: 'error', text: err.message }); }
+          finally { setEventBrandBusy(false); }
+        }} />
+        <div className="branding-preview-box">
+          {activeEvent.event_logo_url ? <img src={activeEvent.event_logo_url} alt="Logo" /> : <div className="event-card-logo default-logo" style={{ width: 44, height: 44 }}><Ticket size={20} /></div>}
+          <div>
+            <b>{activeEvent.event_logo_url ? 'Custom Event Logo' : 'Default Logo Badge'}</b>
+            {activeEvent.event_logo_url && <button type="button" onClick={async () => {
+              await supabase.from('events').update({ event_logo_url: null }).eq('id', activeEvent.id);
+              setActiveEvent(prev => ({ ...prev, event_logo_url: null }));
+              setEvents(prev => prev.map(ev => ev.id === activeEvent.id ? { ...ev, event_logo_url: null } : ev));
+            }} style={{ border: 0, background: 'none', color: '#b94e4e', fontSize: 9, cursor: 'pointer', padding: 0 }}>Reset to default</button>}
+          </div>
+        </div>
+      </div>
+
+      <div className="branding-upload-field">
+        <span>Event Cover Banner</span>
+        <input type="file" accept="image/*" disabled={eventBrandBusy} onChange={async e => {
+          const file = e.target.files?.[0]; if (!file) return;
+          try {
+            setEventBrandBusy(true);
+            const url = await uploadAsset(file, 'event-banners');
+            const { error: err } = await supabase.from('events').update({ banner_url: url }).eq('id', activeEvent.id);
+            if (err) throw err;
+            setActiveEvent(prev => ({ ...prev, banner_url: url }));
+            setEvents(prev => prev.map(ev => ev.id === activeEvent.id ? { ...ev, banner_url: url } : ev));
+            setNotice({ kind: 'success', text: 'Event banner updated.' });
+          } catch(err) { setNotice({ kind: 'error', text: err.message }); }
+          finally { setEventBrandBusy(false); }
+        }} />
+        <div className="branding-preview-box">
+          {activeEvent.banner_url ? <img src={activeEvent.banner_url} alt="Banner" style={{ width: 80, height: 44, borderRadius: 6 }} /> : <div className="event-card-placeholder" style={{ width: 80, height: 44, borderRadius: 6, margin: 0 }}><Activity size={16} /></div>}
+          <div>
+            <b>{activeEvent.banner_url ? 'Custom Banner' : 'Default Gradient Banner'}</b>
+            {activeEvent.banner_url && <button type="button" onClick={async () => {
+              await supabase.from('events').update({ banner_url: null }).eq('id', activeEvent.id);
+              setActiveEvent(prev => ({ ...prev, banner_url: null }));
+              setEvents(prev => prev.map(ev => ev.id === activeEvent.id ? { ...ev, banner_url: null } : ev));
+            }} style={{ border: 0, background: 'none', color: '#b94e4e', fontSize: 9, cursor: 'pointer', padding: 0 }}>Reset to default</button>}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</>}{tab === 'team' && <TeamPanel members={teamMembers} loading={teamLoading} email={teamEmail} setEmail={setTeamEmail} role={teamRole} setRole={setTeamRole} onSubmit={addTeamMember} />}{tab === 'fundclaims' && <FundClaimsPanel event={activeEvent} events={events} claims={fundClaims} summary={claimSummary} loading={claimsLoading} busy={claimBusy} transferRefs={transferRefs} setTransferRefs={setTransferRefs} onClaim={requestFundClaim} onUpdate={updateFundClaim} />}
 {whatsappModal && <WhatsAppModal event={activeEvent} registrations={registrations} onClose={() => setWhatsappModal(false)} />}
+{showBrandModal && <OrgBrandModal org={org} onSave={updated => { setOrg(updated); setOrgs(prev => prev.map(o => o.id === updated.id ? updated : o)) }} onClose={() => setShowBrandModal(false)} />}
     </>}
     <div className="admin-footer-note"><ShieldCheck size={15} /> Each organiser can access only their own workspace data. Keep your login secure.</div>
   </section>

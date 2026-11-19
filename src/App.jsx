@@ -189,6 +189,11 @@ function Dashboard({ user, onSignOut }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [tab, setTab] = useState('participants')
+  const [fundClaims, setFundClaims] = useState([])
+  const [claimSummary, setClaimSummary] = useState(null)
+  const [claimsLoading, setClaimsLoading] = useState(false)
+  const [claimBusy, setClaimBusy] = useState(false)
+  const [transferRefs, setTransferRefs] = useState({})
     const [newEvent, setNewEvent] = useState({ name: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
   const isAdmin = ['owner', 'admin'].includes(role)
   async function loadWorkspace(preferredOrgId = selectedOrgId) {
@@ -234,6 +239,41 @@ function Dashboard({ user, onSignOut }) {
     setTeamLoading(false)
   }
   useEffect(() => { if (tab === 'team') loadTeam() }, [tab, org?.id])
+  async function loadFundClaims() {
+    if (!org || !activeEvent || !isAdmin) return
+    setClaimsLoading(true)
+    const [claimsResult, summaryResult] = await Promise.all([
+      supabase.from('fund_claims').select('*').eq('organization_id', org.id).order('requested_at', { ascending: false }),
+      supabase.rpc('get_fund_claim_summary', { p_event_id: activeEvent.id }),
+    ])
+    if (claimsResult.error) setNotice({ kind: 'error', text: claimsResult.error.message })
+    if (summaryResult.error) setNotice({ kind: 'error', text: summaryResult.error.message })
+    setFundClaims(claimsResult.data || [])
+    setClaimSummary(summaryResult.data || null)
+    setClaimsLoading(false)
+  }
+  useEffect(() => { if (tab === 'fundclaims') loadFundClaims() }, [tab, org?.id, activeEvent?.id])
+  async function requestFundClaim() {
+    if (!activeEvent) return
+    setClaimBusy(true)
+    const { data, error } = await supabase.rpc('request_fund_claim', { p_event_id: activeEvent.id })
+    if (error) setNotice({ kind: 'error', text: error.message })
+    else setNotice({ kind: 'success', text: `Fund claim submitted. Gross ${money(data.gross_amount, data.currency)}, 5% deduction ${money(data.fee_amount, data.currency)}, net claim ${money(data.net_amount, data.currency)}.` })
+    await loadFundClaims()
+    setClaimBusy(false)
+  }
+  async function updateFundClaim(claim, status) {
+    setClaimBusy(true)
+    const { error } = await supabase.rpc('update_fund_claim', {
+      p_claim_id: claim.id, p_status: status,
+      p_cashfree_transfer_id: transferRefs[claim.id] || null,
+      p_admin_note: null,
+    })
+    if (error) setNotice({ kind: 'error', text: error.message })
+    else setNotice({ kind: 'success', text: status === 'paid' ? 'Claim marked paid and recorded.' : status === 'rejected' ? 'Claim rejected. Its funds are available to claim again.' : 'Claim marked as processing.' })
+    await loadFundClaims()
+    setClaimBusy(false)
+  }
   async function addTeamMember(e) {
     e.preventDefault()
     const { error } = await supabase.rpc('add_organization_member', { p_organization_id: org.id, p_email: teamEmail.trim(), p_role: teamRole })
@@ -324,10 +364,10 @@ function Dashboard({ user, onSignOut }) {
     {events.length === 0 && !showEventForm ? <div className="empty-state large"><CalendarDays size={30} /><b>Your first event starts here.</b><span>Create an event page, configure categories and fees, then publish it when you're ready.</span><button className="btn btn-primary" onClick={() => setShowEventForm(true)}><Plus size={16} /> Create your first event</button></div> : activeEvent && <>
       <div className="active-event-bar"><div><span className={`status-badge ${activeEvent.status}`}>{activeEvent.status}</span><h2>{activeEvent.name}</h2><div className="active-event-meta"><span><CalendarDays size={14} /> {prettyDate(activeEvent.starts_on)}</span><span><MapPin size={14} /> {[activeEvent.venue, activeEvent.city].filter(Boolean).join(', ') || 'Venue not set'}</span></div></div><div className="event-actions"><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}><ExternalLink size={15} /> Copy registration link</button>{isAdmin && <><button className="btn btn-outline btn-small" onClick={() => toggleRegistration(activeEvent)}>{activeEvent.registration_open ? 'Close registrations' : 'Reopen registrations'}</button><button className={`btn btn-small ${activeEvent.status === 'published' ? 'btn-danger-outline' : 'btn-primary'}`} onClick={() => togglePublish(activeEvent)}>{activeEvent.status === 'published' ? 'Unpublish' : 'Publish event'} <ArrowRight size={15} /></button></>}</div></div>
       <div className="stats-grid"><StatCard icon={<Users />} label="Total registrations" value={stats.total} detail="All submitted participants" /><StatCard icon={<Clock3 />} label="Awaiting verification" value={stats.pending} detail="Payment review required" /><StatCard icon={<BadgeCheck />} label="Confirmed participants" value={stats.confirmed} detail="Payment verified" /><StatCard icon={<Wallet />} label="Verified collection" value={money(stats.amount, activeEvent.currency)} detail="Based on verified payments" /></div>
-      <div className="dashboard-tabs"><button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')}><Users size={16} /> Participants</button><button className={tab === 'checkin' ? 'active' : ''} onClick={() => setTab('checkin')}><QrCode size={16} /> Event-day check-in</button><button className={tab === 'event' ? 'active' : ''} onClick={() => setTab('event')}><Globe2 size={16} /> Event page</button>{isAdmin && <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}><Users size={16} /> Team</button>}</div>
+      <div className="dashboard-tabs"><button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')}><Users size={16} /> Participants</button><button className={tab === 'checkin' ? 'active' : ''} onClick={() => setTab('checkin')}><QrCode size={16} /> Event-day check-in</button><button className={tab === 'event' ? 'active' : ''} onClick={() => setTab('event')}><Globe2 size={16} /> Event page</button>{isAdmin && <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}><Users size={16} /> Team</button>}{isAdmin && <button className={tab === 'fundclaims' ? 'active' : ''} onClick={() => setTab('fundclaims')}><Wallet size={16} /> Fund claims</button>}</div>
       {tab === 'participants' && <section className="data-panel"><div className="data-panel-head"><div><h3>Participant registrations</h3><p>Review payment status, confirm entries and manage bib numbers.</p></div><button className="btn btn-outline btn-small" onClick={exportCsv}><Download size={15} /> Export CSV</button></div><div className="table-controls"><div className="search-field"><Search size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, email, bib…" /></div><select value={filter} onChange={e => setFilter(e.target.value)}><option value="all">All registrations</option><option value="pending">Payment pending</option><option value="verified">Payment verified</option><option value="rejected">Rejected</option><option value="checked_in">Checked in</option></select></div>{filteredRows.length ? <div className="table-scroll"><table><thead><tr><th>PARTICIPANT</th><th>CATEGORY</th><th>AMOUNT</th><th>PAYMENT</th><th>BIB / ENTRY</th><th>PROOF</th><th>ACTIONS</th></tr></thead><tbody>{filteredRows.map(row => <tr key={row.id}><td><div className="participant-cell"><b>{row.full_name}</b><small>{row.email}</small><small>{row.phone}</small><small className="code-text">{row.registration_code}</small></div></td><td>{row.category}</td><td><b>{money(row.amount_due, activeEvent.currency)}</b></td><td><span className={`status-badge ${row.payment_status}`}>{row.payment_status}</span></td><td>{row.bib_number ? <span className="bib-chip">#{row.bib_number}</span> : <span className="muted">—</span>}{row.checked_in_at && <small className="checked-label"><CheckCircle2 size={12} /> Checked in</small>}</td><td><button className="proof-link" onClick={() => openProof(row)}><FileImage size={14} /> {row.proof_path ? 'View proof' : 'No file'}</button></td><td><div className="row-actions">{row.payment_status === 'pending' && isAdmin && <><button className="approve-btn" title="Verify payment" onClick={() => paymentAction(row, 'approve')}><Check size={15} /></button><button className="reject-btn" title="Reject registration" onClick={() => paymentAction(row, 'reject')}><X size={15} /></button></>}{row.status === 'confirmed' && <QRCodeSVG value={row.registration_code} size={42} level="M" />}</div></td></tr>)}</tbody></table></div> : <div className="table-empty"><Users size={24} /><b>No matching registrations</b><span>Participant entries will appear here when someone submits the public event form.</span></div>}</section>}
       {tab === 'checkin' && <CheckinPanel event={activeEvent} registrations={registrations} onScan={checkIn} />}
-      {tab === 'event' && <div className="event-share-panel"><div className="event-share-text"><div className="eyebrow">PUBLIC REGISTRATION PAGE</div><h3>Share your event with participants.</h3><p>Anyone with this link can view the published event and submit a registration. Draft events are not publicly accessible.</p><div className="share-url">{window.location.origin}/e/{activeEvent.slug}</div><button className="btn btn-primary" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}>Copy event link <ExternalLink size={15} /></button></div><div className="share-qr"><QRCodeSVG value={`${window.location.origin}/e/${activeEvent.slug}`} size={156} level="H" /><small>SCAN TO REGISTER</small></div></div>}{tab === 'team' && <TeamPanel members={teamMembers} loading={teamLoading} email={teamEmail} setEmail={setTeamEmail} role={teamRole} setRole={setTeamRole} onSubmit={addTeamMember} />}
+      {tab === 'event' && <div className="event-share-panel"><div className="event-share-text"><div className="eyebrow">PUBLIC REGISTRATION PAGE</div><h3>Share your event with participants.</h3><p>Anyone with this link can view the published event and submit a registration. Draft events are not publicly accessible.</p><div className="share-url">{window.location.origin}/e/{activeEvent.slug}</div><button className="btn btn-primary" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}>Copy event link <ExternalLink size={15} /></button></div><div className="share-qr"><QRCodeSVG value={`${window.location.origin}/e/${activeEvent.slug}`} size={156} level="H" /><small>SCAN TO REGISTER</small></div></div>}{tab === 'team' && <TeamPanel members={teamMembers} loading={teamLoading} email={teamEmail} setEmail={setTeamEmail} role={teamRole} setRole={setTeamRole} onSubmit={addTeamMember} />}{tab === 'fundclaims' && <FundClaimsPanel event={activeEvent} claims={fundClaims} summary={claimSummary} loading={claimsLoading} busy={claimBusy} transferRefs={transferRefs} setTransferRefs={setTransferRefs} onClaim={requestFundClaim} onUpdate={updateFundClaim} />}
     </>}
     <div className="admin-footer-note"><ShieldCheck size={15} /> Each organiser can access only their own workspace data. Keep your login secure.</div>
   </section>

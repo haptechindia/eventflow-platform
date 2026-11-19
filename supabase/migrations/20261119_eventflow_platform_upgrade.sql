@@ -17,7 +17,7 @@ alter table public.events
   add column if not exists starts_at timestamptz,
   add column if not exists platform_fee_enabled boolean not null default false,
   add column if not exists platform_fee_percent numeric(5,2) not null default 5.00,
-  add column if not exists cashfree_enabled boolean not null default true,
+  add column if not exists cashfree_enabled boolean not null default false,
   add column if not exists whatsapp_updates_enabled boolean not null default false,
   add column if not exists updated_at timestamptz not null default now();
 
@@ -60,6 +60,9 @@ create table if not exists public.payment_orders (
   updated_at timestamptz not null default now()
 );
 create index if not exists payment_orders_registration_idx on public.payment_orders(registration_id, created_at desc);
+-- Prevent concurrent duplicate active orders for the same registration.
+create unique index if not exists payment_orders_one_active_per_registration_uidx
+  on public.payment_orders(registration_id) where status in ('created','pending');
 
 -- Event-level helper assignments: permissions are explicitly granted per event.
 create table if not exists public.event_assignments (
@@ -190,7 +193,7 @@ begin
   if round(p_paid_amount,2) <> round(v_order.total_amount,2) then
     update public.payment_orders set status='amount_mismatch', provider_payment_id=p_provider_payment_id,
       updated_at=now() where id=v_order.id;
-    raise exception 'Cashfree paid amount does not match the stored order amount.';
+    return jsonb_build_object('amount_mismatch',true,'registration_id',v_order.registration_id);
   end if;
   select * into v_reg from public.registrations where id=v_order.registration_id for update;
   if v_reg.payment_status = 'rejected' then raise exception 'Rejected registration cannot be auto-confirmed.'; end if;
@@ -244,12 +247,14 @@ create trigger events_queue_change_notifications after update on public.events
 for each row execute function public.queue_event_change_notifications();
 
 -- Public lookup is intentionally narrow; service-role-only payment confirmation must not be exposed to clients.
-revoke all on function public.lookup_participant_bib(text,text,text) from public;
+revoke all on function public.lookup_participant_bib(text,text,text) from public, anon, authenticated;
 grant execute on function public.lookup_participant_bib(text,text,text) to anon, authenticated;
-revoke all on function public.confirm_cashfree_payment(text,text,numeric) from public, anon, authenticated;
+revoke all on function public.confirm_cashfree_payment(text,text,numeric) from public, anon, authenticated, service_role;
 grant execute on function public.confirm_cashfree_payment(text,text,numeric) to service_role;
-revoke all on function public.has_event_permission(uuid,text) from public;
+revoke all on function public.has_event_permission(uuid,text) from public, anon, authenticated;
 grant execute on function public.has_event_permission(uuid,text) to authenticated;
+-- Trigger functions are invoked by their trigger, not through the Data API.
+revoke all on function public.queue_event_change_notifications() from public, anon, authenticated;
 
 grant select on public.event_assignments to authenticated;
 grant select on public.payment_orders, public.notification_outbox to authenticated;

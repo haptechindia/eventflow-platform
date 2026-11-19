@@ -1,15 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Html5Qrcode } from 'html5-qrcode'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   Activity, ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, CheckCircle2,
   ChevronDown, ClipboardList, Clock3, Download, ExternalLink, FileImage, Globe2,
   LayoutDashboard, LogIn, LogOut, Mail, MapPin, Menu, Plus, QrCode, RefreshCw,
-  Search, ShieldCheck, Ticket, Users, Wallet, X, XCircle, Zap,
+  Search, ShieldCheck, Ticket, Users, Wallet, X, XCircle, Zap, Printer, Copy,
 } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { ContactPage, TermsPage, RefundsPage, ServicesPage } from './LegalPages'
+import { startCashfreeCheckout } from './lib/cashfree'
+
+function WhatsAppIcon({ size = 15 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M17.472 14.382c-.301-.15-1.78-.878-2.056-.978-.276-.1-.476-.15-.676.15-.2.301-.776.978-.952 1.179-.176.2-.351.226-.652.075-.301-.15-1.272-.469-2.423-1.495-.896-.799-1.501-1.787-1.677-2.088-.176-.301-.019-.464.132-.614.136-.135.301-.351.451-.527.15-.176.2-.301.301-.501.1-.2.05-.376-.025-.526-.075-.15-.676-1.63-.927-2.232-.244-.585-.493-.505-.676-.514-.175-.008-.376-.01-.577-.01-.2 0-.527.075-.802.376-.276.301-1.053 1.028-1.053 2.508 0 1.48 1.078 2.909 1.229 3.11.15.2 2.122 3.24 5.141 4.544.718.31 1.278.496 1.716.635.722.23 1.378.197 1.9.12.582-.087 1.78-.727 2.03-1.43.25-.702.25-1.304.175-1.43-.075-.125-.276-.2-.577-.35zM12.04 2C6.516 2 2.036 6.478 2.036 12c0 1.986.58 3.834 1.583 5.394L2 22l4.773-1.572A9.944 9.944 0 0 0 12.04 22c5.524 0 10.003-4.478 10.003-10S17.564 2 12.04 2z"/>
+    </svg>
+  )
+}
+
+function getWhatsAppUrl(phone, message) {
+  if (!phone) return null
+  let digits = String(phone).replace(/\D/g, '')
+  if (digits.length === 10) digits = '91' + digits
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message || '')}`
+}
 
 const money = (amount, currency = 'INR') => new Intl.NumberFormat('en-IN', {
   style: 'currency', currency, maximumFractionDigits: 0,
@@ -71,6 +87,7 @@ function EventPage() {
   const [done, setDone] = useState(null)
   const [file, setFile] = useState(null)
   const [form, setForm] = useState({ full_name: '', email: '', phone: '', category: '', date_of_birth: '', emergency_contact: '', transaction_reference: '' })
+  const [paymentMethod, setPaymentMethod] = useState('online')
   useEffect(() => {
     let live = true
     if (!supabase) { setLoading(false); setError('Connect the Supabase project to load this event.'); return }
@@ -124,9 +141,48 @@ function EventPage() {
     finally { setBusy(false) }
   }
   if (loading) return <><SiteHeader /><div className="page-loading">Loading event…</div></>
-  if (done) return <><SiteHeader /><main className="wrap confirmation-wrap"><div className="confirmation-card"><div className="success-orb"><Check size={32} /></div><div className="eyebrow">REGISTRATION RECEIVED</div><h1>You're on the list.</h1><p>Your details have been submitted to the organiser. Keep this registration reference safe.</p><div className="confirm-code"><small>YOUR REGISTRATION CODE</small><strong>{done.registration_code}</strong><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(done.registration_code)}>Copy code</button></div><div className="confirm-details"><span>Event <b>{event.name}</b></span><span>Category <b>{form.category}</b></span><span>Registration fee <b>{money(done.amount_due, event.currency)}</b></span></div><Notice kind="info">Payment status is pending until the event organiser verifies it.{done.proofNotice}</Notice><Link to="/" className="btn btn-primary">Back to EventFlow <ArrowRight size={16} /></Link></div></main><Footer /></>
+  if (done) return <><SiteHeader /><main className="wrap confirmation-wrap"><div className="confirmation-card"><div className="success-orb"><Check size={32} /></div><div className="eyebrow">REGISTRATION RECEIVED</div><h1>You're on the list.</h1><p>Your details have been submitted to the organiser. Keep this registration reference safe.</p><div className="confirm-code"><small>YOUR REGISTRATION CODE</small><strong>{done.registration_code}</strong><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(done.registration_code)}>Copy code</button></div><div className="confirm-details"><span>Event <b>{event.name}</b></span><span>Category <b>{form.category}</b></span><span>Registration fee <b>{money(done.amount_due, event.currency)}</b></span></div><Notice kind="info">Payment status is pending until verified.{done.proofNotice}</Notice>
+{event?.cashfree_enabled && done.payment_status === 'pending' && (
+  <button
+    className="btn btn-primary btn-full"
+    style={{ margin: '14px 0 8px' }}
+    disabled={busy}
+    onClick={async () => {
+      try {
+        setBusy(true)
+        await startCashfreeCheckout(done.registration_code)
+      } catch (err) {
+        setError(err.message || 'Could not launch payment.')
+      } finally {
+        setBusy(false)
+      }
+    }}
+  >
+    <Wallet size={16} /> {busy ? 'Redirecting…' : `Pay ${money(done.amount_due, event.currency)} Online Now`}
+  </button>
+)}
+<Link to="/" className="btn btn-outline btn-full" style={{ marginTop: 8 }}>Back to EventFlow <ArrowRight size={16} /></Link></div></main><Footer /></>
   return <><SiteHeader /><main className="wrap event-page"><Link className="back-link" to="/"><ArrowLeft size={15} /> All events</Link>{error && <Notice kind="error">{error}</Notice>}{event && <div className="event-layout"><section className="event-detail"><span className="event-pill">ONLINE REGISTRATION</span><h1>{event.name}</h1><p className="event-description">{event.description || 'Register here to participate in this event.'}</p><div className="event-detail-meta"><div><CalendarDays /><span><small>EVENT DATE</small><b>{prettyDate(event.starts_on)}</b></span></div><div><MapPin /><span><small>VENUE</small><b>{[event.venue, event.city].filter(Boolean).join(', ') || 'To be announced'}</b></span></div></div><div className="event-info-panel"><h3>Categories & fees</h3>{categories.map(c => <div className="category-row" key={c.name}><span>{c.name}</span><b>{money(c.fee ?? event.base_fee, event.currency)}</b></div>)}{event.payment_instructions && <div className="payment-instructions"><b>Payment instructions</b><p>{event.payment_instructions}</p>{event.upi_id && <span className="upi-chip">UPI ID: {event.upi_id}</span>}</div>}</div><div className="privacy-note"><ShieldCheck size={17} /><span>Your registration details are shared only with this event's organiser and are not displayed to other participants.</span></div></section>
-    <form className="registration-form" onSubmit={register}><div className="form-heading"><div><div className="eyebrow">PARTICIPANT FORM</div><h2>{event.registration_open ? 'Register now' : 'Registration closed'}</h2></div><span className="required-label">* Required</span></div>{!event.registration_open && <Notice kind="info">Registration for this event is currently closed. Please contact the organiser for more information.</Notice>}<label>Full name <em>*</em><input required maxLength="120" value={form.full_name} onChange={e => setField('full_name', e.target.value)} placeholder="Enter participant name" /></label><div className="form-row"><label>Email address <em>*</em><input type="email" required maxLength="180" value={form.email} onChange={e => setField('email', e.target.value)} placeholder="name@example.com" /></label><label>Mobile number <em>*</em><input type="tel" required maxLength="20" value={form.phone} onChange={e => setField('phone', e.target.value)} placeholder="10-digit mobile number" /></label></div><label>Event category <em>*</em><select required value={form.category} onChange={e => setField('category', e.target.value)}>{categories.map(c => <option key={c.name} value={c.name}>{c.name} — {money(c.fee ?? event.base_fee, event.currency)}</option>)}</select></label><div className="form-row"><label>Date of birth {(chosen?.minAge !== undefined || chosen?.maxAge !== undefined) && <em>*</em>}<input type="date" required={chosen?.minAge !== undefined || chosen?.maxAge !== undefined} value={form.date_of_birth} onChange={e => setField('date_of_birth', e.target.value)} /></label><label>Emergency contact<input type="tel" maxLength="20" value={form.emergency_contact} onChange={e => setField('emergency_contact', e.target.value)} placeholder="Optional" /></label></div><label>UPI / transaction reference<input maxLength="100" value={form.transaction_reference} onChange={e => setField('transaction_reference', e.target.value)} placeholder="Enter transaction ID after payment" /></label><label className="upload-box"><FileImage size={20} /><span><b>Payment screenshot</b><small>{file ? file.name : 'Optional · JPG, PNG, WEBP or PDF · max 5 MB'}</small></span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} /></label><div className="fee-summary"><span>Registration fee</span><strong>{money(fee, event.currency)}</strong></div><label className="consent"><input type="checkbox" required /><span>I confirm that the details provided are correct and agree to the event organiser using them for registration and event communication.</span></label><Notice kind="error">{error}</Notice><button className="btn btn-primary btn-full" disabled={busy || !categories.length || !event.registration_open}>{busy ? 'Submitting registration…' : 'Submit registration'} <ArrowRight size={17} /></button><small className="form-footnote">Your registration will remain pending until the organiser verifies payment.</small></form></div>}</main><Footer /></>
+    <form className="registration-form" onSubmit={register}><div className="form-heading"><div><div className="eyebrow">PARTICIPANT FORM</div><h2>{event.registration_open ? 'Register now' : 'Registration closed'}</h2></div><span className="required-label">* Required</span></div>{!event.registration_open && <Notice kind="info">Registration for this event is currently closed. Please contact the organiser for more information.</Notice>}<label>Full name <em>*</em><input required maxLength="120" value={form.full_name} onChange={e => setField('full_name', e.target.value)} placeholder="Enter participant name" /></label><div className="form-row"><label>Email address <em>*</em><input type="email" required maxLength="180" value={form.email} onChange={e => setField('email', e.target.value)} placeholder="name@example.com" /></label><label>Mobile number <em>*</em><input type="tel" required maxLength="20" value={form.phone} onChange={e => setField('phone', e.target.value)} placeholder="10-digit mobile number" /></label></div><label>Event category <em>*</em><select required value={form.category} onChange={e => setField('category', e.target.value)}>{categories.map(c => <option key={c.name} value={c.name}>{c.name} — {money(c.fee ?? event.base_fee, event.currency)}</option>)}</select></label><div className="form-row"><label>Date of birth {(chosen?.minAge !== undefined || chosen?.maxAge !== undefined) && <em>*</em>}<input type="date" required={chosen?.minAge !== undefined || chosen?.maxAge !== undefined} value={form.date_of_birth} onChange={e => setField('date_of_birth', e.target.value)} /></label><label>Emergency contact<input type="tel" maxLength="20" value={form.emergency_contact} onChange={e => setField('emergency_contact', e.target.value)} placeholder="Optional" /></label></div>{event.cashfree_enabled && (
+  <div className="payment-method-selector">
+    <button type="button" className={`payment-method-btn ${paymentMethod === 'online' ? 'active' : ''}`} onClick={() => setPaymentMethod('online')}>
+      <Wallet size={16} />
+      <span>Pay Online (Cashfree)</span>
+    </button>
+    <button type="button" className={`payment-method-btn ${paymentMethod === 'manual' ? 'active' : ''}`} onClick={() => setPaymentMethod('manual')}>
+      <FileImage size={16} />
+      <span>Manual UPI / Proof</span>
+    </button>
+  </div>
+)}
+{paymentMethod === 'online' && event.cashfree_enabled ? (
+  <Notice kind="info">You will complete instant payment via UPI (PhonePe, GPay, Paytm), Cards or Netbanking after submitting.</Notice>
+) : (
+  <>
+    <label>UPI / transaction reference<input maxLength="100" value={form.transaction_reference} onChange={e => setField('transaction_reference', e.target.value)} placeholder="Enter transaction ID after payment" /></label>
+    <label className="upload-box"><FileImage size={20} /><span><b>Payment screenshot</b><small>{file ? file.name : 'Optional · JPG, PNG, WEBP or PDF · max 5 MB'}</small></span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} /></label>
+  </>
+)}<div className="fee-summary"><span>Registration fee</span><strong>{money(fee, event.currency)}</strong></div><label className="consent"><input type="checkbox" required /><span>I confirm that the details provided are correct and agree to the event organiser using them for registration and event communication.</span></label><Notice kind="error">{error}</Notice><button className="btn btn-primary btn-full" disabled={busy || !categories.length || !event.registration_open}>{busy ? 'Submitting registration…' : 'Submit registration'} <ArrowRight size={17} /></button><small className="form-footnote">Your registration will remain pending until the organiser verifies payment.</small></form></div>}</main><Footer /></>
 }
 
 function AuthPanel({ onAuthenticated }) {
@@ -195,6 +251,7 @@ function Dashboard({ user, onSignOut }) {
   const [claimsLoading, setClaimsLoading] = useState(false)
   const [claimBusy, setClaimBusy] = useState(false)
   const [transferRefs, setTransferRefs] = useState({})
+  const [whatsappModal, setWhatsappModal] = useState(false)
     const [newEvent, setNewEvent] = useState({ name: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
   const isAdmin = ['owner', 'admin'].includes(role)
   async function loadWorkspace(preferredOrgId = selectedOrgId) {
@@ -308,7 +365,7 @@ function Dashboard({ user, onSignOut }) {
     const { data, error } = await supabase.from('events').insert({
       organization_id: org.id, name: newEvent.name.trim(), slug, description: newEvent.description.trim(), venue: newEvent.venue.trim(), city: newEvent.city.trim(), starts_on: newEvent.starts_on || null,
       base_fee: Number(newEvent.base_fee || 0), currency: newEvent.currency, upi_id: newEvent.upi_id.trim() || null, payment_instructions: newEvent.payment_instructions.trim() || null,
-      categories: cats, status: 'draft', registration_open: true,
+      categories: cats, status: 'draft', registration_open: true, cashfree_enabled: Boolean(newEvent.cashfree_enabled),
     }).select().single()
     if (error) setNotice({ kind: 'error', text: error.message })
     else { setEvents(prev => [data, ...prev]); setActiveEvent(data); setShowEventForm(false); setNotice({ kind: 'success', text: 'Event created as a draft. Publish it when you are ready to accept registrations.' }); setNewEvent({ name: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' }) }
@@ -318,6 +375,16 @@ function Dashboard({ user, onSignOut }) {
     const { data, error } = await supabase.from('events').update({ status: next }).eq('id', event.id).select().single()
     if (error) setNotice({ kind: 'error', text: error.message })
     else { setEvents(prev => prev.map(e => e.id === event.id ? data : e)); if (activeEvent?.id === event.id) setActiveEvent(data); setNotice({ kind: 'success', text: next === 'published' ? 'Event published. Share its registration link.' : 'Event moved back to draft.' }) }
+  }
+  async function toggleCashfree(event) {
+    const next = !event.cashfree_enabled
+    const { data, error } = await supabase.from('events').update({ cashfree_enabled: next }).eq('id', event.id).select().single()
+    if (error) setNotice({ kind: 'error', text: error.message })
+    else {
+      setEvents(prev => prev.map(e => e.id === event.id ? data : e))
+      if (activeEvent?.id === event.id) setActiveEvent(data)
+      setNotice({ kind: 'success', text: data.cashfree_enabled ? 'Cashfree online payments enabled.' : 'Cashfree online payments disabled.' })
+    }
   }
   async function toggleRegistration(event) {
     const { data, error } = await supabase.from('events').update({ registration_open: !event.registration_open }).eq('id', event.id).select().single()
@@ -361,14 +428,30 @@ function Dashboard({ user, onSignOut }) {
   <section className="admin-main"><div className="admin-topline"><div><div className="eyebrow">EVENT OPERATIONS / OVERVIEW</div><h1>Good to see you.</h1><p>Manage registrations, payments and event-day check-ins from one place.</p></div><div className="admin-top-actions"><span className="secure-chip"><ShieldCheck size={14} /> Secure workspace</span><button className="icon-btn" onClick={() => { loadWorkspace(); loadRegistrations(activeEvent) }} title="Refresh"><RefreshCw size={17} /></button></div></div>
     {notice && <Notice kind={notice.kind} onClose={() => setNotice(null)}>{notice.text}</Notice>}
     {showOrgForm && <form className="create-event-panel" onSubmit={createOrg}><div className="panel-heading"><div><div className="eyebrow">NEW ORGANISATION</div><h2>Create another organisation</h2></div><button type="button" className="icon-btn" onClick={() => setShowOrgForm(false)}><X size={18} /></button></div><div className="form-grid"><label className="span-2">Organisation / brand name <em>*</em><input required maxLength="100" value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="e.g. Natura’s Trust" /></label></div><div className="panel-footer"><span>You will become the owner of this organisation. Its events and team remain separate.</span><button className="btn btn-primary" type="submit">Create organisation <ArrowRight size={16} /></button></div></form>}
-    {showEventForm && <form className="create-event-panel" onSubmit={createEvent}><div className="panel-heading"><div><div className="eyebrow">NEW EVENT</div><h2>Create an event page</h2></div><button type="button" className="icon-btn" onClick={() => setShowEventForm(false)}><X size={18} /></button></div><div className="form-grid"><label>Event name <em>*</em><input required value={newEvent.name} onChange={e => setNewEvent(v => ({ ...v, name: e.target.value }))} placeholder="e.g. City Charity Run 2027" /></label><label>Event date<input type="date" value={newEvent.starts_on} onChange={e => setNewEvent(v => ({ ...v, starts_on: e.target.value }))} /></label><label>Venue<input value={newEvent.venue} onChange={e => setNewEvent(v => ({ ...v, venue: e.target.value }))} placeholder="Ground / stadium / location" /></label><label>City<input value={newEvent.city} onChange={e => setNewEvent(v => ({ ...v, city: e.target.value }))} placeholder="City, district" /></label><label>Base fee<input type="number" min="0" value={newEvent.base_fee} onChange={e => setNewEvent(v => ({ ...v, base_fee: e.target.value }))} /></label><label>Currency<select value={newEvent.currency} onChange={e => setNewEvent(v => ({ ...v, currency: e.target.value }))}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option></select></label><label>UPI ID<input value={newEvent.upi_id} onChange={e => setNewEvent(v => ({ ...v, upi_id: e.target.value }))} placeholder="name@bank" /></label><label>Categories & fees <small>Name|Fee|Minimum age|Maximum age — one per line</small><textarea required rows="3" value={newEvent.categories} onChange={e => setNewEvent(v => ({ ...v, categories: e.target.value }))} placeholder={'5 KM|200|7|15\n10 KM|300|16|99'} /></label><label className="span-2">Short event description<textarea rows="2" value={newEvent.description} onChange={e => setNewEvent(v => ({ ...v, description: e.target.value }))} placeholder="Tell participants what this event is about" /></label><label className="span-2">Payment instructions<textarea rows="2" value={newEvent.payment_instructions} onChange={e => setNewEvent(v => ({ ...v, payment_instructions: e.target.value }))} /></label></div><div className="panel-footer"><span>New events start as drafts. You choose when to publish.</span><button className="btn btn-primary" type="submit">Create draft event <ArrowRight size={16} /></button></div></form>}
+    {showEventForm && <form className="create-event-panel" onSubmit={createEvent}><div className="panel-heading"><div><div className="eyebrow">NEW EVENT</div><h2>Create an event page</h2></div><button type="button" className="icon-btn" onClick={() => setShowEventForm(false)}><X size={18} /></button></div><div className="form-grid"><label>Event name <em>*</em><input required value={newEvent.name} onChange={e => setNewEvent(v => ({ ...v, name: e.target.value }))} placeholder="e.g. City Charity Run 2027" /></label><label>Event date<input type="date" value={newEvent.starts_on} onChange={e => setNewEvent(v => ({ ...v, starts_on: e.target.value }))} /></label><label>Venue<input value={newEvent.venue} onChange={e => setNewEvent(v => ({ ...v, venue: e.target.value }))} placeholder="Ground / stadium / location" /></label><label>City<input value={newEvent.city} onChange={e => setNewEvent(v => ({ ...v, city: e.target.value }))} placeholder="City, district" /></label><label>Base fee<input type="number" min="0" value={newEvent.base_fee} onChange={e => setNewEvent(v => ({ ...v, base_fee: e.target.value }))} /></label><label>Currency<select value={newEvent.currency} onChange={e => setNewEvent(v => ({ ...v, currency: e.target.value }))}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option></select></label><label>UPI ID<input value={newEvent.upi_id} onChange={e => setNewEvent(v => ({ ...v, upi_id: e.target.value }))} placeholder="name@bank" /></label><label>Categories & fees <small>Name|Fee|Minimum age|Maximum age — one per line</small><textarea required rows="3" value={newEvent.categories} onChange={e => setNewEvent(v => ({ ...v, categories: e.target.value }))} placeholder={'5 KM|200|7|15\n10 KM|300|16|99'} /></label><label className="span-2">Short event description<textarea rows="2" value={newEvent.description} onChange={e => setNewEvent(v => ({ ...v, description: e.target.value }))} placeholder="Tell participants what this event is about" /></label><label className="span-2">Payment instructions<textarea rows="2" value={newEvent.payment_instructions} onChange={e => setNewEvent(v => ({ ...v, payment_instructions: e.target.value }))} /></label><label className="span-2" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}><input type="checkbox" checked={Boolean(newEvent.cashfree_enabled)} onChange={e => setNewEvent(v => ({ ...v, cashfree_enabled: e.target.checked }))} /> <span>Enable Cashfree online checkout for this event (UPI, Cards, Netbanking)</span></label></div><div className="panel-footer"><span>New events start as drafts. You choose when to publish.</span><button className="btn btn-primary" type="submit">Create draft event <ArrowRight size={16} /></button></div></form>}
     {events.length === 0 && !showEventForm ? <div className="empty-state large"><CalendarDays size={30} /><b>Your first event starts here.</b><span>Create an event page, configure categories and fees, then publish it when you're ready.</span><button className="btn btn-primary" onClick={() => setShowEventForm(true)}><Plus size={16} /> Create your first event</button></div> : activeEvent && <>
-      <div className="active-event-bar"><div><span className={`status-badge ${activeEvent.status}`}>{activeEvent.status}</span><h2>{activeEvent.name}</h2><div className="active-event-meta"><span><CalendarDays size={14} /> {prettyDate(activeEvent.starts_on)}</span><span><MapPin size={14} /> {[activeEvent.venue, activeEvent.city].filter(Boolean).join(', ') || 'Venue not set'}</span></div></div><div className="event-actions"><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}><ExternalLink size={15} /> Copy registration link</button>{isAdmin && <><button className="btn btn-outline btn-small" onClick={() => toggleRegistration(activeEvent)}>{activeEvent.registration_open ? 'Close registrations' : 'Reopen registrations'}</button><button className={`btn btn-small ${activeEvent.status === 'published' ? 'btn-danger-outline' : 'btn-primary'}`} onClick={() => togglePublish(activeEvent)}>{activeEvent.status === 'published' ? 'Unpublish' : 'Publish event'} <ArrowRight size={15} /></button></>}</div></div>
+      <div className="active-event-bar"><div><span className={`status-badge ${activeEvent.status}`}>{activeEvent.status}</span><h2>{activeEvent.name}</h2><div className="active-event-meta"><span><CalendarDays size={14} /> {prettyDate(activeEvent.starts_on)}</span><span><MapPin size={14} /> {[activeEvent.venue, activeEvent.city].filter(Boolean).join(', ') || 'Venue not set'}</span></div></div><div className="event-actions"><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}><ExternalLink size={15} /> Copy registration link</button>{isAdmin && <><button className={`btn btn-small ${activeEvent.cashfree_enabled ? 'btn-outline' : 'btn-quiet'}`} onClick={() => toggleCashfree(activeEvent)} title="Toggle online payments for this event"><Wallet size={14} /> Cashfree: {activeEvent.cashfree_enabled ? 'Active' : 'Off'}</button><button className="btn btn-outline btn-small" onClick={() => toggleRegistration(activeEvent)}>{activeEvent.registration_open ? 'Close registrations' : 'Reopen registrations'}</button><button className={`btn btn-small ${activeEvent.status === 'published' ? 'btn-danger-outline' : 'btn-primary'}`} onClick={() => togglePublish(activeEvent)}>{activeEvent.status === 'published' ? 'Unpublish' : 'Publish event'} <ArrowRight size={15} /></button></>}</div></div>
       <div className="stats-grid"><StatCard icon={<Users />} label="Total registrations" value={stats.total} detail="All submitted participants" /><StatCard icon={<Clock3 />} label="Awaiting verification" value={stats.pending} detail="Payment review required" /><StatCard icon={<BadgeCheck />} label="Confirmed participants" value={stats.confirmed} detail="Payment verified" /><StatCard icon={<Wallet />} label="Verified collection" value={money(stats.amount, activeEvent.currency)} detail="Based on verified payments" /></div>
       <div className="dashboard-tabs"><button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')}><Users size={16} /> Participants</button><button className={tab === 'checkin' ? 'active' : ''} onClick={() => setTab('checkin')}><QrCode size={16} /> Event-day check-in</button><button className={tab === 'event' ? 'active' : ''} onClick={() => setTab('event')}><Globe2 size={16} /> Event page</button>{isAdmin && <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}><Users size={16} /> Team</button>}{isAdmin && <button className={tab === 'fundclaims' ? 'active' : ''} onClick={() => setTab('fundclaims')}><Wallet size={16} /> Fund claims</button>}</div>
-      {tab === 'participants' && <section className="data-panel"><div className="data-panel-head"><div><h3>Participant registrations</h3><p>Review payment status, confirm entries and manage bib numbers.</p></div><button className="btn btn-outline btn-small" onClick={exportCsv}><Download size={15} /> Export CSV</button></div><div className="table-controls"><div className="search-field"><Search size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, email, bib…" /></div><select value={filter} onChange={e => setFilter(e.target.value)}><option value="all">All registrations</option><option value="pending">Payment pending</option><option value="verified">Payment verified</option><option value="rejected">Rejected</option><option value="checked_in">Checked in</option></select></div>{filteredRows.length ? <div className="table-scroll"><table><thead><tr><th>PARTICIPANT</th><th>CATEGORY</th><th>AMOUNT</th><th>PAYMENT</th><th>BIB / ENTRY</th><th>PROOF</th><th>ACTIONS</th></tr></thead><tbody>{filteredRows.map(row => <tr key={row.id}><td><div className="participant-cell"><b>{row.full_name}</b><small>{row.email}</small><small>{row.phone}</small><small className="code-text">{row.registration_code}</small></div></td><td>{row.category}</td><td><b>{money(row.amount_due, activeEvent.currency)}</b></td><td><span className={`status-badge ${row.payment_status}`}>{row.payment_status}</span></td><td>{row.bib_number ? <span className="bib-chip">#{row.bib_number}</span> : <span className="muted">—</span>}{row.checked_in_at && <small className="checked-label"><CheckCircle2 size={12} /> Checked in</small>}</td><td><button className="proof-link" onClick={() => openProof(row)}><FileImage size={14} /> {row.proof_path ? 'View proof' : 'No file'}</button></td><td><div className="row-actions">{row.payment_status === 'pending' && isAdmin && <><button className="approve-btn" title="Verify payment" onClick={() => paymentAction(row, 'approve')}><Check size={15} /></button><button className="reject-btn" title="Reject registration" onClick={() => paymentAction(row, 'reject')}><X size={15} /></button></>}{row.status === 'confirmed' && <QRCodeSVG value={row.registration_code} size={42} level="M" />}</div></td></tr>)}</tbody></table></div> : <div className="table-empty"><Users size={24} /><b>No matching registrations</b><span>Participant entries will appear here when someone submits the public event form.</span></div>}</section>}
+      {tab === 'participants' && <section className="data-panel"><div className="data-panel-head"><div><h3>Participant registrations</h3><p>Review payment status, confirm entries and manage bib numbers.</p></div><div style={{ display: 'flex', gap: 8 }}><button className="btn btn-outline btn-small" onClick={() => setWhatsappModal(true)} style={{ color: '#0e8b69', borderColor: '#a3d9be', display: 'inline-flex', alignItems: 'center', gap: 6 }}><WhatsAppIcon size={14} /> Message via WhatsApp</button><button className="btn btn-outline btn-small" onClick={exportCsv}><Download size={15} /> Export CSV</button></div></div><div className="table-controls"><div className="search-field"><Search size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, email, bib…" /></div><select value={filter} onChange={e => setFilter(e.target.value)}><option value="all">All registrations</option><option value="pending">Payment pending</option><option value="verified">Payment verified</option><option value="rejected">Rejected</option><option value="checked_in">Checked in</option></select></div>{filteredRows.length ? <div className="table-scroll"><table><thead><tr><th>PARTICIPANT</th><th>CATEGORY</th><th>AMOUNT</th><th>PAYMENT</th><th>BIB / ENTRY</th><th>PROOF</th><th>ACTIONS</th></tr></thead><tbody>{filteredRows.map(row => <tr key={row.id}><td><div className="participant-cell"><b>{row.full_name}</b><small>{row.email}</small><small>{row.phone}</small><small className="code-text">{row.registration_code}</small></div></td><td>{row.category}</td><td><b>{money(row.amount_due, activeEvent.currency)}</b></td><td><span className={`status-badge ${row.payment_status}`}>{row.payment_status}</span></td><td>{row.bib_number ? <span className="bib-chip">#{row.bib_number}</span> : <span className="muted">—</span>}{row.checked_in_at && <small className="checked-label"><CheckCircle2 size={12} /> Checked in</small>}</td><td><button className="proof-link" onClick={() => openProof(row)}><FileImage size={14} /> {row.proof_path ? 'View proof' : 'No file'}</button></td><td><div className="row-actions">
+{row.phone && (
+  <a
+    href={getWhatsAppUrl(row.phone, row.status === 'confirmed'
+      ? `Hi ${row.full_name}! Your registration for ${activeEvent.name} is confirmed. Registration Code: ${row.registration_code}${row.bib_number ? `, Bib #${row.bib_number}` : ''}. Date: ${prettyDate(activeEvent.starts_on)}, Venue: ${activeEvent.venue || 'TBA'}. Please show your QR pass at check-in!`
+      : `Hi ${row.full_name}! We received your registration for ${activeEvent.name} (Code: ${row.registration_code}). Amount due: ${money(row.amount_due, activeEvent.currency)}. Please complete your payment to confirm your bib number.`
+    )}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="whatsapp-icon-btn"
+    title="Message participant directly from your WhatsApp"
+  >
+    <WhatsAppIcon size={14} />
+  </a>
+)}
+{row.payment_status === 'pending' && isAdmin && <><button className="approve-btn" title="Verify payment" onClick={() => paymentAction(row, 'approve')}><Check size={15} /></button><button className="reject-btn" title="Reject registration" onClick={() => paymentAction(row, 'reject')}><X size={15} /></button></>}{row.status === 'confirmed' && <QRCodeSVG value={row.registration_code} size={42} level="M" />}</div></td></tr>)}</tbody></table></div> : <div className="table-empty"><Users size={24} /><b>No matching registrations</b><span>Participant entries will appear here when someone submits the public event form.</span></div>}</section>}
       {tab === 'checkin' && <CheckinPanel event={activeEvent} registrations={registrations} onScan={checkIn} />}
       {tab === 'event' && <div className="event-share-panel"><div className="event-share-text"><div className="eyebrow">PUBLIC REGISTRATION PAGE</div><h3>Share your event with participants.</h3><p>Anyone with this link can view the published event and submit a registration. Draft events are not publicly accessible.</p><div className="share-url">{window.location.origin}/e/{activeEvent.slug}</div><button className="btn btn-primary" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}>Copy event link <ExternalLink size={15} /></button></div><div className="share-qr"><QRCodeSVG value={`${window.location.origin}/e/${activeEvent.slug}`} size={156} level="H" /><small>SCAN TO REGISTER</small></div></div>}{tab === 'team' && <TeamPanel members={teamMembers} loading={teamLoading} email={teamEmail} setEmail={setTeamEmail} role={teamRole} setRole={setTeamRole} onSubmit={addTeamMember} />}{tab === 'fundclaims' && <FundClaimsPanel event={activeEvent} events={events} claims={fundClaims} summary={claimSummary} loading={claimsLoading} busy={claimBusy} transferRefs={transferRefs} setTransferRefs={setTransferRefs} onClaim={requestFundClaim} onUpdate={updateFundClaim} />}
+{whatsappModal && <WhatsAppModal event={activeEvent} registrations={registrations} onClose={() => setWhatsappModal(false)} />}
     </>}
     <div className="admin-footer-note"><ShieldCheck size={15} /> Each organiser can access only their own workspace data. Keep your login secure.</div>
   </section>
@@ -418,7 +501,257 @@ function Scanner({ onScan }) {
 
 function Footer() { return <footer className="footer wrap"><Link className="brand" to="/"><span className="brand-mark"><Activity size={17} /></span><span>event<span className="brand-light">flow</span></span></Link><span>Reusable event registration & operations platform.</span><span><Link to="/contact">Contact</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link> · <Link to="/services">Services & pricing</Link></span></footer> }
 
+function WhatsAppModal({ event, registrations, onClose }) {
+  const [filter, setFilter] = useState('all')
+  const [template, setTemplate] = useState('confirmed')
+  const [customText, setCustomText] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const confirmedList = useMemo(() => registrations.filter(r => r.status === 'confirmed'), [registrations])
+  const pendingList = useMemo(() => registrations.filter(r => r.payment_status === 'pending'), [registrations])
+
+  const targetList = useMemo(() => {
+    if (filter === 'confirmed') return confirmedList
+    if (filter === 'pending') return pendingList
+    return registrations
+  }, [filter, registrations, confirmedList, pendingList])
+
+  function getMessageForParticipant(p) {
+    if (customText.trim()) {
+      return customText
+        .replace('{name}', p.full_name)
+        .replace('{bib}', p.bib_number ? `#${p.bib_number}` : 'TBA')
+        .replace('{code}', p.registration_code)
+        .replace('{event}', event.name)
+        .replace('{venue}', event.venue || 'TBA')
+        .replace('{date}', prettyDate(event.starts_on))
+        .replace('{amount}', money(p.amount_due, event.currency))
+    }
+    if (template === 'confirmed' || p.status === 'confirmed') {
+      return `Hi ${p.full_name}! Your registration for ${event.name} is confirmed. Registration Code: ${p.registration_code}${p.bib_number ? `, Bib #${p.bib_number}` : ''}. Date: ${prettyDate(event.starts_on)}, Venue: ${event.venue || 'TBA'}. Please show your QR pass at check-in!`
+    }
+    return `Hi ${p.full_name}! We received your registration for ${event.name} (Code: ${p.registration_code}). Amount due: ${money(p.amount_due, event.currency)}. Please complete your payment to confirm your bib number.`
+  }
+
+  function copyAllPhones() {
+    const phones = targetList.map(r => {
+      let d = String(r.phone || '').replace(/\D/g, '')
+      if (d.length === 10) d = '91' + d
+      return d
+    }).filter(Boolean)
+    navigator.clipboard?.writeText(phones.join(','))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2500)
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="whatsapp-modal" onClick={e => e.stopPropagation()}>
+        <div className="whatsapp-modal-head">
+          <h3><WhatsAppIcon size={20} /> Message Participants via WhatsApp</h3>
+          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <p style={{ fontSize: 11, color: '#63736f', margin: '0 0 12px' }}>
+          Opens your personal WhatsApp (Desktop or Phone) with the pre-filled message for each participant.
+        </p>
+
+        <div className="whatsapp-filter-bar">
+          <button className={`whatsapp-filter-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+            All ({registrations.length})
+          </button>
+          <button className={`whatsapp-filter-btn ${filter === 'confirmed' ? 'active' : ''}`} onClick={() => setFilter('confirmed')}>
+            Confirmed ({confirmedList.length})
+          </button>
+          <button className={`whatsapp-filter-btn ${filter === 'pending' ? 'active' : ''}`} onClick={() => setFilter('pending')}>
+            Payment Pending ({pendingList.length})
+          </button>
+          <button className="btn btn-outline btn-small" style={{ marginLeft: 'auto' }} onClick={copyAllPhones}>
+            <Copy size={13} /> {copied ? 'Copied numbers!' : 'Copy all phone numbers'}
+          </button>
+        </div>
+
+        <div className="whatsapp-message-box">
+          <label>Custom message template (tags: {'{name}'}, {'{bib}'}, {'{code}'}, {'{event}'}, {'{date}'}, {'{venue}'}):</label>
+          <textarea
+            rows="3"
+            placeholder="Leave empty for auto-generated confirmation or payment reminder message..."
+            value={customText}
+            onChange={e => setCustomText(e.target.value)}
+          />
+        </div>
+
+        <div className="whatsapp-participant-list">
+          {targetList.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 20, fontSize: 11, color: '#888' }}>No participants in this filter.</div>
+          ) : (
+            targetList.map(p => {
+              const url = getWhatsAppUrl(p.phone, getMessageForParticipant(p))
+              return (
+                <div className="whatsapp-participant-item" key={p.id}>
+                  <div>
+                    <b>{p.full_name} {p.bib_number ? `(#${p.bib_number})` : ''}</b>
+                    <small>{p.phone} · {p.registration_code} · {p.payment_status}</small>
+                  </div>
+                  {url ? (
+                    <a href={url} target="_blank" rel="noopener noreferrer" className="whatsapp-send-link">
+                      <WhatsAppIcon size={12} /> Send WhatsApp
+                    </a>
+                  ) : (
+                    <small style={{ color: '#999' }}>No phone</small>
+                  )}
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PaymentReturnPage() {
+  const [params] = useSearchParams()
+  const orderId = params.get('order_id')
+  const code = params.get('code')
+  const [reg, setReg] = useState(null)
+  const [event, setEvent] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  async function check() {
+    if (!code && !orderId) {
+      setError('No registration or order reference was found in the link.')
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      let q = supabase.from('registrations').select('*')
+      if (code) q = q.eq('registration_code', code.trim().toUpperCase())
+      else if (orderId) q = q.eq('cashfree_order_id', orderId.trim())
+      const { data, error: err } = await q.maybeSingle()
+      if (err) throw err
+      if (!data) {
+        setError('Registration record not found. If your payment was deducted, please wait a moment or contact the organiser.')
+        setLoading(false)
+        return
+      }
+      setReg(data)
+      const { data: ev } = await supabase.from('events').select('*').eq('id', data.event_id).single()
+      setEvent(ev)
+    } catch (e) {
+      setError(e.message || 'Unable to load payment confirmation.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    check()
+    const t1 = setTimeout(check, 2500)
+    const t2 = setTimeout(check, 6000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [code, orderId])
+
+  const isConfirmed = reg?.payment_status === 'verified' || reg?.status === 'confirmed'
+  const isPending = reg?.payment_status === 'pending'
+
+  return (
+    <>
+      <SiteHeader />
+      <main className="wrap payment-return-wrap">
+        <div className="payment-return-card">
+          {loading && !reg ? (
+            <div className="page-loading">Checking payment confirmation with Cashfree…</div>
+          ) : error ? (
+            <>
+              <div className="success-orb" style={{ background: '#fff0ee', color: '#b94e4e' }}><XCircle size={32} /></div>
+              <div className="eyebrow" style={{ color: '#b94e4e' }}>PAYMENT STATUS</div>
+              <h1>Verification issue</h1>
+              <p>{error}</p>
+              <div style={{ marginTop: 20, display: 'flex', gap: 10, justifyContent: 'center' }}>
+                <button className="btn btn-outline" onClick={check}><RefreshCw size={14} /> Try again</button>
+                <Link to="/" className="btn btn-primary">Return to events</Link>
+              </div>
+            </>
+          ) : isConfirmed ? (
+            <>
+              <div className="success-orb"><Check size={32} /></div>
+              <div className="eyebrow">PAYMENT CONFIRMED</div>
+              <h1>You're officially in!</h1>
+              <p>Your payment was verified successfully. Keep your registration pass and bib number safe.</p>
+
+              <div className="confirm-code">
+                <small>YOUR REGISTRATION CODE</small>
+                <strong>{reg.registration_code}</strong>
+                {reg.bib_number && (
+                  <div style={{ marginTop: 8 }}>
+                    <span className="bib-chip" style={{ fontSize: 13, padding: '6px 12px' }}>BIB #{reg.bib_number}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="pass-qr-box">
+                <QRCodeSVG value={reg.registration_code} size={150} level="H" />
+                <small>ENTRY QR PASS · SCAN AT VENUE</small>
+              </div>
+
+              <div className="confirm-details">
+                <span>Participant <b>{reg.full_name}</b></span>
+                {event && <span>Event <b>{event.name}</b></span>}
+                <span>Category <b>{reg.category}</b></span>
+                {event?.starts_on && <span>Event date <b>{prettyDate(event.starts_on)}</b></span>}
+                {event?.venue && <span>Venue <b>{[event.venue, event.city].filter(Boolean).join(', ')}</b></span>}
+                <span>Total amount paid <b>{money(reg.total_paid || reg.amount_due, event?.currency || 'INR')}</b></span>
+              </div>
+
+              <div style={{ marginTop: 22, display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button className="btn btn-outline" onClick={() => window.print()}><Printer size={15} /> Print / Save pass</button>
+                {event?.slug && <Link to={`/e/${event.slug}`} className="btn btn-primary">Back to event page <ArrowRight size={15} /></Link>}
+              </div>
+            </>
+          ) : isPending ? (
+            <>
+              <div className="success-orb" style={{ background: '#fff5df', color: '#98702c' }}><Clock3 size={32} /></div>
+              <div className="eyebrow" style={{ color: '#98702c' }}>PROCESSING PAYMENT</div>
+              <h1>Awaiting confirmation</h1>
+              <p>Cashfree has received your payment request and our system is confirming your registration. This usually takes just a few seconds.</p>
+              {reg && (
+                <div className="confirm-code">
+                  <small>REGISTRATION REFERENCE</small>
+                  <strong>{reg.registration_code}</strong>
+                </div>
+              )}
+              <div style={{ marginTop: 20, display: 'flex', gap: 10, justifyContent: 'center' }}>
+                <button className="btn btn-primary" onClick={check}><RefreshCw size={14} /> Refresh status</button>
+                <Link to="/" className="btn btn-outline">Explore other events</Link>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="success-orb" style={{ background: '#fff0ee', color: '#b94e4e' }}><XCircle size={32} /></div>
+              <div className="eyebrow" style={{ color: '#b94e4e' }}>REGISTRATION STATUS</div>
+              <h1>{reg?.payment_status === 'rejected' ? 'Registration cancelled' : 'Payment pending'}</h1>
+              <p>Please contact the event organiser with your registration code if you completed payment.</p>
+              {reg && (
+                <div className="confirm-code">
+                  <small>YOUR CODE</small>
+                  <strong>{reg.registration_code}</strong>
+                </div>
+              )}
+              <Link to="/" className="btn btn-primary" style={{ marginTop: 20 }}>Return home</Link>
+            </>
+          )}
+        </div>
+      </main>
+      <Footer />
+    </>
+  )
+}
+
 export default function App() {
-  return <Routes><Route path="/" element={<HomePage />} /><Route path="/e/:slug" element={<EventPage />} /><Route path="/admin" element={<AdminPage />} /><Route path="/contact" element={<ContactPage />} /><Route path="/terms" element={<TermsPage />} /><Route path="/refunds" element={<RefundsPage />} /><Route path="/services" element={<ServicesPage />} /><Route path="*" element={<NotFound />} /></Routes>
+  return <Routes><Route path="/" element={<HomePage />} /><Route path="/e/:slug" element={<EventPage />} /><Route path="/admin" element={<AdminPage />} /><Route path="/contact" element={<ContactPage />} /><Route path="/terms" element={<TermsPage />} /><Route path="/refunds" element={<RefundsPage />} /><Route path="/services" element={<ServicesPage />} /><Route path="/payment-return" element={<PaymentReturnPage />} /><Route path="*" element={<NotFound />} /></Routes>
 }
 function NotFound() { return <><SiteHeader /><main className="wrap empty-page"><div className="empty-state"><XCircle size={28} /><b>Page not found</b><Link className="text-link" to="/">Return home <ArrowRight size={14} /></Link></div></main><Footer /></> }

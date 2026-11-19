@@ -4,7 +4,7 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405 });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const expectedSecret = Deno.env.get("NOTIFICATION_WORKER_SECRET");
   if (!expectedSecret || req.headers.get("x-worker-secret") !== expectedSecret) {
     return json({ error: "Unauthorized worker." }, 401);

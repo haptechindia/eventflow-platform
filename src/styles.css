@@ -16,3 +16,204 @@
 .claim-summary-card{display:grid;gap:16px;background:linear-gradient(135deg,#eef8f1,#fff);border:1px solid #d7e9dd;border-radius:14px;padding:20px;margin-bottom:20px}.claim-summary-card>div:first-child{display:grid;gap:4px}.claim-summary-card>div:first-child small{font-size:10px;font-weight:800;letter-spacing:1px;color:#5d7a6b}.claim-summary-card>div:first-child strong{font-size:30px;letter-spacing:-1px;color:var(--deep)}.claim-summary-card>div:first-child span{font-size:12px;color:var(--muted)}.claim-breakdown{display:flex;flex-wrap:wrap;gap:18px}.claim-breakdown span{font-size:12px;color:var(--muted)}.claim-breakdown b{color:var(--ink);margin-left:5px}.claim-footnote{font-size:11px;color:var(--muted);line-height:1.5}.claim-list{display:grid;gap:12px}.claim-list h4{margin:0;font-size:14px}.claim-card{border:1px solid var(--line);border-radius:12px;padding:15px;display:grid;gap:12px}.claim-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.claim-card-head>div{display:grid;gap:4px}.claim-card-head small,.claim-reference{font-size:11px;color:var(--muted)}.claim-amounts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.claim-amounts span{display:grid;gap:3px;font-size:11px;color:var(--muted)}.claim-amounts b{font-size:13px;color:var(--ink)}.claim-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.claim-actions label{flex:1;min-width:220px;font-size:11px;color:var(--muted);display:grid;gap:5px}.claim-actions input{padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:white}.status-badge.processing{background:#fff4db;color:#8b641c}.status-badge.paid{background:#e5f5ec;color:#17744e}.status-badge.rejected{background:#fff0f0;color:#a64545}@media(max-width:650px){.claim-amounts{grid-template-columns:1fr}.claim-summary-card{padding:15px}.claim-actions .btn{flex:1}}
 
 .policy-page{padding-top:26px;padding-bottom:56px;max-width:900px}.policy-card{background:var(--surface, #fff);border:1px solid var(--line);border-radius:18px;padding:clamp(22px,4vw,48px);margin:20px 0;box-shadow:0 12px 36px rgba(20,30,50,.04)}.policy-card h1{font-size:clamp(30px,5vw,44px);letter-spacing:-.04em;margin:10px 0 24px}.policy-card h2{font-size:20px;margin:28px 0 10px}.policy-card p,.policy-card li{color:var(--muted);line-height:1.75}.policy-card a{color:var(--accent,#2563eb);text-decoration:underline}.policy-updated{font-size:12px;border-top:1px solid var(--line);padding-top:16px;margin-top:32px}.policy-contact{display:flex;gap:14px;padding:16px;border:1px solid var(--line);border-radius:12px;margin:14px 0}.policy-contact>svg{flex-shrink:0}.policy-contact p{margin:4px 0}.policy-pricing{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:22px 0}.policy-pricing article{border:1px solid var(--line);border-radius:14px;padding:18px}.policy-pricing article>span{font-size:12px;color:var(--muted)}.policy-pricing h2{font-size:18px;margin:12px 0}.policy-pricing b{display:block;margin:12px 0;color:var(--text,#111827)}.policy-pricing small{display:block;color:var(--muted);line-height:1.5}.footer a:not(.brand){color:inherit;text-decoration:underline}@media(max-width:650px){.policy-pricing{grid-template-columns:1fr}.policy-card{padding:22px 18px}.policy-card h1{font-size:30px}}
+
+/* WhatsApp direct messaging styles */
+.whatsapp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+  background: #25D366;
+  color: #fff !important;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  border: 0;
+  text-decoration: none !important;
+  cursor: pointer;
+}
+.whatsapp-icon-btn:hover {
+  transform: scale(1.08);
+  opacity: 0.95;
+}
+.whatsapp-modal {
+  max-width: 640px;
+  width: min(640px, 95vw);
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.whatsapp-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.whatsapp-modal-head h3 {
+  margin: 0;
+  font: 800 18px Manrope, sans-serif;
+  color: var(--deep);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.whatsapp-filter-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.whatsapp-filter-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+.whatsapp-filter-btn.active {
+  background: #e8f5ed;
+  color: #0e8b69;
+  border-color: #0e8b69;
+}
+.whatsapp-message-box {
+  margin-bottom: 14px;
+}
+.whatsapp-message-box label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--deep);
+  display: block;
+  margin-bottom: 5px;
+}
+.whatsapp-message-box textarea {
+  width: 100%;
+  border: 1px solid #dfe7e1;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 11px;
+  resize: vertical;
+  font-family: inherit;
+}
+.whatsapp-participant-list {
+  overflow-y: auto;
+  max-height: 250px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+}
+.whatsapp-participant-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #fbfcfb;
+  border-radius: 8px;
+  border: 1px solid #f0f4f1;
+}
+.whatsapp-participant-item:hover {
+  background: #f4faf6;
+}
+.whatsapp-participant-item>div {
+  display: grid;
+  gap: 2px;
+}
+.whatsapp-participant-item b {
+  font-size: 11px;
+  color: var(--deep);
+}
+.whatsapp-participant-item small {
+  font-size: 9px;
+  color: var(--muted);
+}
+.whatsapp-send-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #25D366;
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 10px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  text-decoration: none !important;
+}
+.whatsapp-send-link:hover {
+  background: #1eb956;
+}
+
+/* Payment return page */
+.payment-return-wrap {
+  padding: 40px 20px 80px;
+  display: flex;
+  justify-content: center;
+}
+.payment-return-card {
+  width: min(540px, 100%);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 36px 30px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(16, 45, 43, 0.08);
+}
+.payment-return-card .success-orb {
+  margin: 0 auto 16px;
+}
+.payment-return-card h1 {
+  font: 800 28px Manrope, sans-serif;
+  letter-spacing: -1px;
+  margin: 8px 0;
+  color: var(--deep);
+}
+.pass-qr-box {
+  margin: 18px auto;
+  padding: 16px;
+  background: #f6fbf7;
+  border: 2px dashed #b8d9c4;
+  border-radius: 14px;
+  display: inline-block;
+}
+.pass-qr-box small {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: #75887c;
+  font-weight: 800;
+  margin-top: 8px;
+}
+.payment-method-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.payment-method-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 12px 10px;
+  border: 2px solid var(--line);
+  background: #fff;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+.payment-method-btn.active {
+  border-color: #0e8b69;
+  background: #e8f5ed;
+  color: #0e8b69;
+}

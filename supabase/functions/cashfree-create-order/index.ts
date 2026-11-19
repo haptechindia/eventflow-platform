@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
           customer_phone: reg.phone.replace(/\D/g, "").slice(-10),
         },
         order_meta: {
-          return_url: `${siteUrl.replace(/\/$/, "")}/payment-return?order_id={order_id}`,
+          return_url: `${siteUrl.replace(/\/$/, "")}/payment-return?order_id={order_id}&code=${encodeURIComponent(reg.registration_code)}`,
           notify_url: `${supabaseUrl}/functions/v1/cashfree-webhook`,
         },
         order_note: `EventFlow registration ${reg.registration_code}`,

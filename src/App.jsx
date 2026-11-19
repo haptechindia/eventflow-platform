@@ -9,6 +9,7 @@ import {
   Search, ShieldCheck, Ticket, Users, Wallet, X, XCircle, Zap,
 } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
+import { ContactPage, TermsPage, RefundsPage, ServicesPage } from './LegalPages'
 
 const money = (amount, currency = 'INR') => new Intl.NumberFormat('en-IN', {
   style: 'currency', currency, maximumFractionDigits: 0,
@@ -415,9 +416,9 @@ function Scanner({ onScan }) {
   return <div className="scanner-box"><div id={readerId} /><small>Point your phone camera at the participant's EventFlow QR code.</small>{error && <Notice kind="error">{error}</Notice>}</div>
 }
 
-function Footer() { return <footer className="footer wrap"><Link className="brand" to="/"><span className="brand-mark"><Activity size={17} /></span><span>event<span className="brand-light">flow</span></span></Link><span>Reusable event registration & operations platform.</span><span>Built for organisers · Powered by Supabase</span></footer> }
+function Footer() { return <footer className="footer wrap"><Link className="brand" to="/"><span className="brand-mark"><Activity size={17} /></span><span>event<span className="brand-light">flow</span></span></Link><span>Reusable event registration & operations platform.</span><span><Link to="/contact">Contact</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link> · <Link to="/services">Services & pricing</Link></span></footer> }
 
 export default function App() {
-  return <Routes><Route path="/" element={<HomePage />} /><Route path="/e/:slug" element={<EventPage />} /><Route path="/admin" element={<AdminPage />} /><Route path="*" element={<NotFound />} /></Routes>
+  return <Routes><Route path="/" element={<HomePage />} /><Route path="/e/:slug" element={<EventPage />} /><Route path="/admin" element={<AdminPage />} /><Route path="/contact" element={<ContactPage />} /><Route path="/terms" element={<TermsPage />} /><Route path="/refunds" element={<RefundsPage />} /><Route path="/services" element={<ServicesPage />} /><Route path="*" element={<NotFound />} /></Routes>
 }
 function NotFound() { return <><SiteHeader /><main className="wrap empty-page"><div className="empty-state"><XCircle size={28} /><b>Page not found</b><Link className="text-link" to="/">Return home <ArrowRight size={14} /></Link></div></main><Footer /></> }

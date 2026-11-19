@@ -1,14 +1,14 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Activity, Mail, ShieldCheck } from 'lucide-react'
 
-const supportEmail = 'SUPPORT_EMAIL_TO_BE_CONFIGURED'
+const supportEmail = 'HAPTECHINDIA@GMAIL.COM'
 
 function PolicyLayout({ title, eyebrow, children }) {
   return <><header className="topbar"><Link className="brand" to="/"><span className="brand-mark"><Activity size={19} /></span><span>event<span className="brand-light">flow</span></span><span className="brand-tag">EVENT OPERATIONS</span></Link><nav><Link to="/">Explore events</Link><Link to="/admin">Organiser login</Link></nav></header><main className="wrap policy-page"><Link className="back-link" to="/"><ArrowLeft size={15}/> Back to EventFlow</Link><div className="policy-card"><div className="eyebrow">{eyebrow}</div><h1>{title}</h1>{children}<p className="policy-updated">Last updated: 19 November 2026</p></div></main><footer className="footer wrap"><Link className="brand" to="/"><span className="brand-mark"><Activity size={17}/></span><span>event<span className="brand-light">flow</span></span></Link><span>Event registration & operations platform.</span><span><Link to="/contact">Contact</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link> · <Link to="/services">Services & pricing</Link></span></footer></>
 }
 
 export function ContactPage() {
- return <PolicyLayout title="Contact Us" eyebrow="CUSTOMER SUPPORT"><p>EventFlow provides event registration, ticketing and event-management tools. Contact us for help with platform access, registration, payment or technical issues.</p><div className="policy-contact"><Mail/><div><b>Email support</b><p>{supportEmail === 'SUPPORT_EMAIL_TO_BE_CONFIGURED' ? 'Support email is being configured. For event-specific questions, use the contact details provided by the event organiser.' : supportEmail}</p></div></div><div className="policy-contact"><ShieldCheck/><div><b>Support hours</b><p>Monday–Saturday, 10:00 AM–6:00 PM IST (excluding public holidays). We aim to respond within 2–3 business days.</p></div></div><h2>What to include in your request</h2><ul><li>Event name and registration code, if applicable</li><li>Payment transaction/reference ID for payment issues</li><li>A short description of the issue</li></ul><p>Event organisers are responsible for their event details, venue, schedules and participant arrangements.</p></PolicyLayout>
+ return <PolicyLayout title="Contact Us" eyebrow="CUSTOMER SUPPORT"><p>EventFlow provides event registration, ticketing and event-management tools. Contact us for help with platform access, registration, payment or technical issues.</p><div className="policy-contact"><Mail/><div><b>Email support</b><p><a href={`mailto:${supportEmail}`}>{supportEmail}</a></p></div></div><div className="policy-contact"><ShieldCheck/><div><b>Support hours</b><p>Monday–Saturday, 10:00 AM–6:00 PM IST (excluding public holidays). We aim to respond within 2–3 business days.</p></div></div><h2>What to include in your request</h2><ul><li>Event name and registration code, if applicable</li><li>Payment transaction/reference ID for payment issues</li><li>A short description of the issue</li></ul><p>Event organisers are responsible for their event details, venue, schedules and participant arrangements.</p></PolicyLayout>
 }
 
 export function TermsPage() {

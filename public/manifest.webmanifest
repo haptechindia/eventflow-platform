@@ -1,0 +1,13 @@
+{
+  "name": "EventFlow Organiser",
+  "short_name": "EventFlow",
+  "description": "Manage event registrations, payments, volunteers and check-ins.",
+  "start_url": "/admin",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7faf7",
+  "theme_color": "#176b4a",
+  "icons": [
+    { "src": "/eventflow-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -10,8 +10,9 @@ For an existing EventFlow database, do **not** re-run the base `supabase/schema.
 2. `20261119_eventflow_event_permissions.sql`
 3. `20261119_eventflow_security_and_permissions_hardening.sql`
 4. `20261119_eventflow_whatsapp_optin_guard.sql`
+5. `20261119_eventflow_multi_organisation_team_scope.sql`
 
-These migrations preserve existing organisation, event and registration rows. They add organisation/event branding fields, Cashfree order records, event-level helper assignments, a WhatsApp notification outbox and a limited bib lookup RPC. Cashfree is **disabled by default** on every event; enable it only after server secrets are configured and sandbox checkout/webhook tests pass.
+These migrations preserve existing organisation, event and registration rows. They add organisation/event branding fields, Cashfree order records, event-level helper assignments, a WhatsApp notification outbox and a limited bib lookup RPC. The multi-organisation dashboard lets one login own or join multiple workspaces, switch the active organisation, and create additional organisations. Team invitations now include the selected organisation ID and are authorized against that organisation; the legacy RPC that silently selected the oldest workspace is removed. Cashfree is **disabled by default** on every event; enable it only after server secrets are configured and sandbox checkout/webhook tests pass.
 
 ## 2. Cashfree central gateway
 
@@ -75,6 +76,6 @@ The PWA manifest, icon and service worker are included. Add the manifest link to
 
 ## Important before production
 
-The four additive migrations have been applied to the connected EventFlow Supabase project and verified. Existing counts remain 1 organisation, 1 member, 1 event and 1 registration; the new payment/assignment/outbox tables are empty. The Edge Functions have **not** been deployed because required Cashfree and WhatsApp secrets have not yet been configured, and the function code still needs final hardening and sandbox validation. WhatsApp outbox creation now requires both event-level WhatsApp enablement and participant opt-in.
+The five additive migrations have been applied to the connected EventFlow Supabase project and verified. Existing counts remain 1 organisation, 1 member, 1 event and 1 registration; the new payment/assignment/outbox tables are empty. The Edge Functions have **not** been deployed because required Cashfree and WhatsApp secrets have not yet been configured, and the function code still needs final hardening and sandbox validation. WhatsApp outbox creation now requires both event-level WhatsApp enablement and participant opt-in.
 
 This branch is a backend foundation, not a completed production rollout. The existing React registration form and dashboard still need the payment button, brand editor/uploads, QR/certificate branding, volunteer assignment UI, participant bib lookup UI, notification controls, opt-in checkbox and PWA install prompt wired to these additions. Keep Cashfree in sandbox until all flows and webhook signatures are verified.

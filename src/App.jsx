@@ -142,7 +142,24 @@ function Notice({ kind = 'info', children, onClose }) {
 }
 
 function SiteHeader({ admin = false }) {
-  return <header className="topbar"><Link className="brand" to="/"><span className="brand-mark"><Activity size={19} /></span><span>event<span className="brand-light">flow</span></span><span className="brand-tag">EVENT OPERATIONS</span></Link><nav><Link to="/">Explore events</Link><Link className={admin ? 'nav-active' : 'nav-cta'} to="/admin">{admin ? 'Admin workspace' : 'Organiser login'} <ArrowRight size={15} /></Link></nav></header>
+  return (
+    <header className="topbar">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Link className="brand" to="/">
+          <span className="brand-mark"><Activity size={19} /></span>
+          <span>event<span className="brand-light">flow</span></span>
+          <span className="brand-tag">EVENT OPERATIONS</span>
+        </Link>
+        <span className="powered-badge">Powered by <b>HAPTECH</b></span>
+      </div>
+      <nav>
+        <Link to="/">Explore events</Link>
+        <Link className={admin ? 'nav-active' : 'nav-cta'} to="/admin">
+          {admin ? 'Admin workspace' : 'Organiser login'} <ArrowRight size={15} />
+        </Link>
+      </nav>
+    </header>
+  )
 }
 
 function SetupBanner() {
@@ -244,23 +261,27 @@ function EventPage() {
   if (loading) return <><SiteHeader /><div className="page-loading">Loading event…</div></>
   if (done) return <><SiteHeader /><main className="wrap confirmation-wrap"><div className="confirmation-card"><div className="success-orb"><Check size={32} /></div><div className="eyebrow">REGISTRATION RECEIVED</div><h1>You're on the list.</h1><p>Your details have been submitted to the organiser. Keep this registration reference safe.</p><div className="confirm-code"><small>YOUR REGISTRATION CODE</small><strong>{done.registration_code}</strong><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(done.registration_code)}>Copy code</button></div><div className="confirm-details"><span>Event <b>{event.name}</b></span><span>Category <b>{form.category}</b></span><span>Registration fee <b>{money(done.amount_due, event.currency)}</b></span></div><Notice kind="info">Payment status is pending until verified.{done.proofNotice}</Notice>
 {event?.cashfree_enabled && done.payment_status === 'pending' && (
-  <button
-    className="btn btn-primary btn-full"
-    style={{ margin: '14px 0 8px' }}
-    disabled={busy}
-    onClick={async () => {
-      try {
-        setBusy(true)
-        await startCashfreeCheckout(done.registration_code)
-      } catch (err) {
-        setError(err.message || 'Could not launch payment.')
-      } finally {
-        setBusy(false)
-      }
-    }}
-  >
-    <Wallet size={16} /> {busy ? 'Redirecting…' : `Pay ${money(done.amount_due, event.currency)} Online Now`}
-  </button>
+  <div style={{ marginTop: 14 }}>
+    <button
+      className="btn btn-primary btn-full"
+      disabled={busy}
+      onClick={async () => {
+        try {
+          setBusy(true)
+          await startCashfreeCheckout(done.registration_code)
+        } catch (err) {
+          setError(err.message || 'Could not launch payment.')
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      <Wallet size={16} /> {busy ? 'Redirecting to Cashfree…' : `Pay ${money(done.amount_due, event.currency)} Online Now`}
+    </button>
+    <small style={{ display: 'block', textAlign: 'center', color: '#687e70', fontSize: 11, marginTop: 6 }}>
+      🔒 Payments processed securely by <b>Haptech</b> via Cashfree Payments
+    </small>
+  </div>
 )}
 <Link to="/" className="btn btn-outline btn-full" style={{ marginTop: 8 }}>Back to EventFlow <ArrowRight size={16} /></Link></div></main><Footer /></>
   return <><SiteHeader /><main className="wrap event-page"><Link className="back-link" to="/"><ArrowLeft size={15} /> All events</Link>{error && <Notice kind="error">{error}</Notice>}{event && <div className="event-layout"><section className="event-detail">
@@ -293,7 +314,7 @@ function EventPage() {
   <div className="payment-method-selector">
     <button type="button" className={`payment-method-btn ${paymentMethod === 'online' ? 'active' : ''}`} onClick={() => setPaymentMethod('online')}>
       <Wallet size={16} />
-      <span>Pay Online (Cashfree)</span>
+      <span>Pay Online (Cashfree · Haptech)</span>
     </button>
     <button type="button" className={`payment-method-btn ${paymentMethod === 'manual' ? 'active' : ''}`} onClick={() => setPaymentMethod('manual')}>
       <FileImage size={16} />
@@ -302,7 +323,7 @@ function EventPage() {
   </div>
 )}
 {paymentMethod === 'online' && event.cashfree_enabled ? (
-  <Notice kind="info">You will complete instant payment via UPI (PhonePe, GPay, Paytm), Cards or Netbanking after submitting.</Notice>
+  <Notice kind="info">Instant online checkout powered by Haptech via Cashfree. Pay securely with any UPI app (GPay, PhonePe, Paytm), Debit/Credit Cards or Netbanking.</Notice>
 ) : (
   <>
     <label>UPI / transaction reference<input maxLength="100" value={form.transaction_reference} onChange={e => setField('transaction_reference', e.target.value)} placeholder="Enter transaction ID after payment" /></label>
@@ -911,7 +932,7 @@ function PaymentUnlockModal({ event, busy, onPay, onClose }) {
           </div>
 
           <small style={{ fontSize: 11, color: '#687e70', lineHeight: 1.4 }}>
-            🔒 Payments processed securely via Cashfree Payments India. Once verified, event publishing and participant registrations are instantly unlocked.
+            🔒 Payments processed securely by <b>Haptech</b> via Cashfree Payments India. Once verified, event publishing and participant registrations are instantly unlocked.
           </small>
         </div>
         <div className="billing-modal-footer">
@@ -949,7 +970,7 @@ function FeeReceiptModal({ event, org, onClose }) {
                 <h3 style={{ margin: 0, fontSize: 18, color: '#176b4a', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Activity size={18} /> EventFlow
                 </h3>
-                <small style={{ color: '#66776c' }}>Event Operations & Billing Infrastructure</small>
+                <small style={{ color: '#66776c' }}>Powered by <b>HAPTECH</b> (Haptech India)</small>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <span className={`status-badge ${event.billing_status === 'paid' || isFree ? 'confirmed' : 'pending'}`}>
@@ -960,6 +981,10 @@ function FeeReceiptModal({ event, org, onClose }) {
             </div>
 
             <div className="receipt-grid">
+              <div>
+                <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>MERCHANT ENTITY</span>
+                <b>Haptech (Haptech India)</b>
+              </div>
               <div>
                 <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>ORGANISATION</span>
                 <b>{org?.name || 'Event Organiser'}</b>
@@ -973,13 +998,17 @@ function FeeReceiptModal({ event, org, onClose }) {
                 <b>{event.name}</b>
               </div>
               <div>
+                <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>PAYMENT GATEWAY</span>
+                <b>Cashfree Payments (Haptech)</b>
+              </div>
+              <div>
                 <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>TRANSACTION REF</span>
                 <b style={{ wordBreak: 'break-all', fontSize: 11 }}>{event.platform_fee_order_id || (isFree ? 'FREE_TIER_QUOTA' : 'DIRECT_WAIVER')}</b>
               </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #eef3ef', fontSize: 13 }}>
-              <span>EventFlow Platform Hosting & Registration Setup</span>
+              <span>EventFlow Platform Hosting & Registration Setup (Haptech)</span>
               <b>₹{feePaid.toFixed(2)}</b>
             </div>
 
@@ -989,7 +1018,7 @@ function FeeReceiptModal({ event, org, onClose }) {
             </div>
 
             <div style={{ marginTop: 16, fontSize: 10, color: '#829588', lineHeight: 1.4 }}>
-              * Event platform fee covers cloud hosting, Cashfree checkout integration, QR verification and dashboard features. Billed in accordance with EventFlow Terms of Service.
+              * Event platform fee covers cloud hosting, Cashfree checkout integration, QR verification and dashboard features. Platform provided and billed by Haptech (Haptech India).
             </div>
           </div>
         </div>
@@ -1279,7 +1308,27 @@ function Scanner({ onScan }) {
   return <div className="scanner-box"><div id={readerId} /><small>Point your phone camera at the participant's EventFlow QR code.</small>{error && <Notice kind="error">{error}</Notice>}</div>
 }
 
-function Footer() { return <footer className="footer wrap"><Link className="brand" to="/"><span className="brand-mark"><Activity size={17} /></span><span>event<span className="brand-light">flow</span></span></Link><span>Reusable event registration & operations platform.</span><span><Link to="/contact">Contact</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link> · <Link to="/services">Services & pricing</Link></span></footer> }
+function Footer() {
+  return (
+    <footer className="footer wrap">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Link className="brand" to="/">
+            <span className="brand-mark"><Activity size={17} /></span>
+            <span>event<span className="brand-light">flow</span></span>
+          </Link>
+          <span style={{ fontSize: 11, color: '#687e70' }}>· Powered by <b>HAPTECH</b></span>
+        </div>
+        <small style={{ color: '#829588', fontSize: 11 }}>
+          © {new Date().getFullYear()} Haptech (Haptech India). All rights reserved. Payments secured via Cashfree.
+        </small>
+      </div>
+      <span>
+        <Link to="/contact">Contact</Link> · <Link to="/terms">Terms</Link> · <Link to="/refunds">Refunds</Link> · <Link to="/services">Services & pricing</Link>
+      </span>
+    </footer>
+  )
+}
 
 function WhatsAppModal({ event, registrations, onClose }) {
   const [filter, setFilter] = useState('all')
@@ -1524,6 +1573,9 @@ function PaymentReturnPage() {
               <Link to="/" className="btn btn-primary" style={{ marginTop: 20 }}>Return home</Link>
             </>
           )}
+          <div style={{ marginTop: 24, paddingTop: 14, borderTop: '1px solid #eef3ef', fontSize: 11, color: '#829588', textAlign: 'center' }}>
+            Payments processed securely by <b>Haptech (Haptech India)</b> via Cashfree Payments
+          </div>
         </div>
       </main>
       <Footer />

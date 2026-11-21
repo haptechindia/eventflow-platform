@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
           customer_details: {
             customer_id: event.organization_id,
             customer_name: (org?.name || event.name).slice(0, 50),
-            customer_email: "support@eventflow.org",
+            customer_email: "haptechindia@gmail.com",
             customer_phone: "9999999999",
           },
           order_meta: {
@@ -132,10 +132,12 @@ Deno.serve(async (req) => {
             notify_url: `${supabaseUrl}/functions/v1/cashfree-webhook`,
             payment_methods: "cc,dc,upi,nb",
           },
-          order_note: `EventFlow Event Platform Fee - ${event.name.slice(0, 30)}`,
+          order_note: `Haptech EventFlow - Platform Fee ${event.name.slice(0, 30)}`,
           order_tags: {
+            merchant: "Haptech",
+            brand: "EventFlow",
             category: "EVENT_PLATFORM_FEE",
-            product: "EventFlow Event Creation Fee",
+            product: "EventFlow Event Creation Fee by Haptech",
             event_id: event.id,
             organization_id: event.organization_id,
           },
@@ -226,14 +228,21 @@ Deno.serve(async (req) => {
         customer_details: {
           customer_id: reg.id,
           customer_name: reg.full_name,
-          customer_email: reg.email,
-          customer_phone: reg.phone.replace(/\D/g, "").slice(-10),
+          customer_email: reg.email || "haptechindia@gmail.com",
+          customer_phone: reg.phone.replace(/\D/g, "").slice(-10) || "9999999999",
         },
         order_meta: {
           return_url: `${siteUrl.replace(/\/$/, "")}/payment-return?order_id={order_id}&code=${encodeURIComponent(reg.registration_code)}`,
           notify_url: `${supabaseUrl}/functions/v1/cashfree-webhook`,
+          payment_methods: "cc,dc,upi,nb",
         },
-        order_note: `EventFlow registration ${reg.registration_code}`,
+        order_note: `Haptech EventFlow - ${event.name.slice(0, 20)} (${reg.registration_code})`,
+        order_tags: {
+          merchant: "Haptech",
+          brand: "EventFlow",
+          event_id: reg.event_id,
+          registration_code: reg.registration_code,
+        },
       }),
     });
     const cf = await cashfreeResponse.json();

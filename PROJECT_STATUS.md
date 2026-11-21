@@ -1,7 +1,7 @@
 # EventFlow Platform — Project Status
 
-> **Last Updated:** 2026-11-19  
-> **Branch:** `feat/central-payments-branding-whatsapp-pwa`  
+> **Last Updated:** 2026-11-21  
+> **Branch:** `feat/freemium-pricing-event-billing`  
 > **Build:** ✅ Passing (Vite 7.3.8, exit code 0)
 
 ---
@@ -20,6 +20,22 @@
 ---
 
 ## ✅ Completed Features
+
+### Freemium Pricing & Event Billing (NEW)
+
+| Feature | Detail |
+|---|---|
+| ✅ **Organisation-level Free Quota** | First 3 events per organisation are 100% free; tracked and enforced at the organisation level |
+| ✅ **Pay-Per-Event Billing (₹999)** | 4th event onwards requires a one-time ₹999 platform access fee; no monthly/annual subscription |
+| ✅ **Database Publishing Guard** | Check constraint & RLS ensure no event can be published unless billing is `'free'` or `'paid'` |
+| ✅ **Dedicated Platform Fee Orders** | `platform_fee_orders` table separates platform fees from participant ticket payments |
+| ✅ **Cashfree Platform Fee Integration** | Server-side order creation (`order_type: 'event_platform_fee'`) and signature-verified webhook handling |
+| ✅ **Server-side Payment Verification** | On redirect return (`/admin?billing_return=1`), verifies status directly with Cashfree API without relying on client redirect |
+| ✅ **Sidebar Quota Tracker** | Live progress bar showing `X / 3 Free Events Used` with quota status chip |
+| ✅ **Organiser Billing & Quota Tab** | Dashboard tab with quota metrics, plan cards, event transaction history table |
+| ✅ **Printable Tax Invoice / Receipt** | Organisers can view and print official platform fee payment receipts |
+| ✅ **Admin Complimentary Waivers** | Authorised admins can grant complimentary waivers with audit-logged reasons |
+| ✅ **Legal & Pricing Policies** | Updated Terms, Services, and Refunds pages reflecting freemium & ₹999 platform fee |
 
 ### Public / Registration Experience
 

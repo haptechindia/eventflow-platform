@@ -36,6 +36,22 @@ Deno.serve(async (req) => {
     if (payment.payment_status !== "SUCCESS") return new Response("Payment not successful", { status: 200 });
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    // Check if this is a platform event fee order
+    if (orderId.startsWith("ef_fee_")) {
+      const { error } = await supabase.rpc("confirm_platform_fee_payment", {
+        p_provider_order_id: orderId,
+        p_provider_payment_id: String(payment.cf_payment_id ?? ""),
+        p_paid_amount: Number(payment.payment_amount),
+      });
+      if (error) {
+        console.error("Cashfree platform fee confirmation failed", error.message);
+        return new Response("Platform fee confirmation failed", { status: 500 });
+      }
+      return new Response("OK", { status: 200 });
+    }
+
+    // Otherwise, participant registration ticket payment
     const { error } = await supabase.rpc("confirm_cashfree_payment", {
       p_provider_order_id: orderId,
       p_provider_payment_id: String(payment.cf_payment_id ?? ""),

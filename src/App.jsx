@@ -7,10 +7,11 @@ import {
   ChevronDown, ClipboardList, Clock3, Download, ExternalLink, FileImage, Globe2,
   LayoutDashboard, LogIn, LogOut, Mail, MapPin, Menu, Plus, QrCode, RefreshCw,
   Search, ShieldCheck, Ticket, Users, Wallet, X, XCircle, Zap, Printer, Copy,
+  CreditCard, Lock, Unlock, AlertCircle, Receipt, Award,
 } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { ContactPage, TermsPage, RefundsPage, ServicesPage } from './LegalPages'
-import { startCashfreeCheckout } from './lib/cashfree'
+import { startCashfreeCheckout, startPlatformFeeCheckout, verifyPlatformFeeOrder } from './lib/cashfree'
 
 function WhatsAppIcon({ size = 15 }) {
   return (
@@ -379,8 +380,96 @@ function Dashboard({ user, onSignOut }) {
   const [whatsappModal, setWhatsappModal] = useState(false)
   const [showBrandModal, setShowBrandModal] = useState(false)
   const [eventBrandBusy, setEventBrandBusy] = useState(false)
-    const [newEvent, setNewEvent] = useState({ name: '', tagline: '', event_logo_url: '', banner_url: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
+  const [orgQuota, setOrgQuota] = useState(null)
+  const [platformFeeBusy, setPlatformFeeBusy] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [receiptModalEvent, setReceiptModalEvent] = useState(null)
+  const [showAdminWaiverModal, setShowAdminWaiverModal] = useState(false)
+  const [waiverReason, setWaiverReason] = useState('')
+  const [waiverTargetEventId, setWaiverTargetEventId] = useState('')
+  const [newEvent, setNewEvent] = useState({ name: '', tagline: '', event_logo_url: '', banner_url: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
   const isAdmin = ['owner', 'admin'].includes(role)
+
+  async function loadQuota(orgId, currentEvents = null) {
+    if (!orgId) return
+    try {
+      const { data, error } = await supabase.rpc('get_organization_event_quota', { p_organization_id: orgId })
+      if (!error && data) {
+        setOrgQuota(data)
+        return
+      }
+    } catch (e) {
+      console.warn('Quota RPC fallback:', e)
+    }
+    const evs = currentEvents || events
+    const freeUsed = evs.filter(e => e.billing_type === 'free' || !e.billing_type).length
+    const limit = org?.free_event_limit || 3
+    const paidCount = evs.filter(e => (e.billing_type === 'paid' || e.billing_type === 'complimentary') && e.billing_status === 'paid').length
+    const pendingCount = evs.filter(e => e.billing_status === 'pending').length
+    setOrgQuota({
+      free_limit: limit,
+      free_used: freeUsed,
+      free_remaining: Math.max(0, limit - freeUsed),
+      is_exhausted: freeUsed >= limit,
+      paid_events_count: paidCount,
+      pending_events_count: pendingCount,
+      total_platform_fees_paid: paidCount * 999,
+      per_event_fee: 999.00
+    })
+  }
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    if (urlParams.get('billing_return') === '1') {
+      const orderId = urlParams.get('order_id')
+      window.history.replaceState({}, document.title, window.location.pathname)
+      if (orderId) {
+        setNotice({ kind: 'info', text: 'Verifying platform fee payment with Cashfree…' })
+        verifyPlatformFeeOrder(orderId).then(res => {
+          if (res?.verified || res?.status === 'paid') {
+            setNotice({ kind: 'success', text: 'Payment confirmed! Event publishing is unlocked.' })
+          } else {
+            setNotice({ kind: 'info', text: `Payment status: ${res?.status || 'pending'}. It will unlock once confirmed.` })
+          }
+          loadWorkspace()
+        }).catch(err => {
+          console.error(err)
+          setNotice({ kind: 'info', text: 'Verifying payment with Cashfree. Please refresh in a moment.' })
+          loadWorkspace()
+        })
+      }
+    }
+  }, [])
+
+  async function handlePayPlatformFee(eventToPay = activeEvent) {
+    if (!eventToPay) return
+    setPlatformFeeBusy(true)
+    try {
+      await startPlatformFeeCheckout(eventToPay.id)
+    } catch (err) {
+      setNotice({ kind: 'error', text: err.message || 'Unable to open Cashfree checkout.' })
+      setPlatformFeeBusy(false)
+    }
+  }
+
+  async function grantWaiver(eventId, reason) {
+    if (!eventId) return
+    try {
+      const { error } = await supabase.rpc('grant_complimentary_event', {
+        p_event_id: eventId,
+        p_reason: reason || 'Platform administrator waiver'
+      })
+      if (error) throw error
+      setNotice({ kind: 'success', text: 'Complimentary waiver granted! Event unlocked for publishing.' })
+      setShowAdminWaiverModal(false)
+      setWaiverReason('')
+      setWaiverTargetEventId('')
+      await loadWorkspace()
+    } catch (err) {
+      setNotice({ kind: 'error', text: err.message })
+    }
+  }
+
   async function loadWorkspace(preferredOrgId = selectedOrgId) {
     setLoading(true)
     const { data: memberships, error } = await supabase.from('organization_members').select('organization_id, role').eq('user_id', user.id).order('created_at', { ascending: true })
@@ -400,11 +489,13 @@ function Dashboard({ user, onSignOut }) {
     setRole(selected.role)
     const { data: eventRows, error: eventErr } = await supabase.from('events').select('*').eq('organization_id', selected.id).order('created_at', { ascending: false })
     if (eventErr) setNotice({ kind: 'error', text: eventErr.message })
-    setEvents(eventRows || [])
-    setActiveEvent(current => (eventRows || []).find(e => e.id === current?.id) || (eventRows || [])[0] || null)
+    const allEvents = eventRows || []
+    setEvents(allEvents)
+    setActiveEvent(current => allEvents.find(e => e.id === current?.id) || allEvents[0] || null)
     setRegistrations([])
     setTeamMembers([])
     setTab('participants')
+    await loadQuota(selected.id, allEvents)
     setLoading(false)
   }
   useEffect(() => { loadWorkspace() }, [user.id])
@@ -489,19 +580,49 @@ function Dashboard({ user, onSignOut }) {
     if (!cats.length || cats.some(c => !c.name || Number.isNaN(c.fee) || c.fee < 0 || (c.minAge !== undefined && (!Number.isInteger(c.minAge) || c.minAge < 0)) || (c.maxAge !== undefined && (!Number.isInteger(c.maxAge) || c.maxAge < 0)) || (c.minAge !== undefined && c.maxAge !== undefined && c.maxAge < c.minAge))) { setNotice({ kind: 'error', text: 'Add categories per line: Category name|fee|minimum age|maximum age' }); return }
     const slug = slugify(newEvent.name)
     if (!slug) { setNotice({ kind: 'error', text: 'Enter an event name containing letters or numbers.' }); return }
+
+    const isExhausted = orgQuota ? orgQuota.is_exhausted : (events.filter(ev => ev.billing_type === 'free' || !ev.billing_type).length >= (org?.free_event_limit || 3))
+    const bType = isExhausted ? 'paid' : 'free'
+    const bStatus = isExhausted ? 'pending' : 'free'
+    const pFee = isExhausted ? 999.00 : 0.00
+
     const { data, error } = await supabase.from('events').insert({
       organization_id: org.id, name: newEvent.name.trim(), slug, description: newEvent.description.trim(), venue: newEvent.venue.trim(), city: newEvent.city.trim(), starts_on: newEvent.starts_on || null,
       base_fee: Number(newEvent.base_fee || 0), currency: newEvent.currency, upi_id: newEvent.upi_id.trim() || null, payment_instructions: newEvent.payment_instructions.trim() || null, tagline: newEvent.tagline.trim(), event_logo_url: newEvent.event_logo_url.trim() || null, banner_url: newEvent.banner_url.trim() || null,
       categories: cats, status: 'draft', registration_open: true, cashfree_enabled: Boolean(newEvent.cashfree_enabled),
+      billing_type: bType, billing_status: bStatus, platform_fee_amount: pFee,
     }).select().single()
+
     if (error) setNotice({ kind: 'error', text: error.message })
-    else { setEvents(prev => [data, ...prev]); setActiveEvent(data); setShowEventForm(false); setNotice({ kind: 'success', text: 'Event created as a draft. Publish it when you are ready to accept registrations.' }); setNewEvent({ name: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' }) }
+    else {
+      setEvents(prev => [data, ...prev])
+      setActiveEvent(data)
+      setShowEventForm(false)
+      if (isExhausted) {
+        setNotice({ kind: 'info', text: 'Event created! Your organisation has used all 3 free events. Complete the ₹999 platform fee to publish.' })
+        setShowPaymentModal(true)
+      } else {
+        setNotice({ kind: 'success', text: `Event created on Free Plan (${(orgQuota?.free_used || 0) + 1} of ${orgQuota?.free_limit || 3} free events). Publish it when you are ready.` })
+      }
+      setNewEvent({ name: '', tagline: '', event_logo_url: '', banner_url: '', description: '', venue: '', city: '', starts_on: '', base_fee: '200', currency: 'INR', upi_id: '', payment_instructions: 'Pay using any UPI app and enter the transaction reference in the registration form.', categories: 'General|200' })
+      loadQuota(org.id)
+    }
   }
   async function togglePublish(event) {
     const next = event.status === 'published' ? 'draft' : 'published'
+    if (next === 'published' && event.billing_type === 'paid' && event.billing_status !== 'paid') {
+      setNotice({ kind: 'error', text: 'This event requires a one-time ₹999 platform fee before it can be published.' })
+      setShowPaymentModal(true)
+      return
+    }
     const { data, error } = await supabase.from('events').update({ status: next }).eq('id', event.id).select().single()
     if (error) setNotice({ kind: 'error', text: error.message })
-    else { setEvents(prev => prev.map(e => e.id === event.id ? data : e)); if (activeEvent?.id === event.id) setActiveEvent(data); setNotice({ kind: 'success', text: next === 'published' ? 'Event published. Share its registration link.' : 'Event moved back to draft.' }) }
+    else {
+      setEvents(prev => prev.map(e => e.id === event.id ? data : e))
+      if (activeEvent?.id === event.id) setActiveEvent(data)
+      setNotice({ kind: 'success', text: next === 'published' ? 'Event published. Share its registration link.' : 'Event moved back to draft.' })
+      loadQuota(org.id)
+    }
   }
   async function toggleCashfree(event) {
     const next = !event.cashfree_enabled
@@ -566,11 +687,55 @@ function Dashboard({ user, onSignOut }) {
   <button className="side-brand-btn" onClick={() => setShowBrandModal(true)}>
     <FileImage size={12} /> Customise logo
   </button>
-)}<label className="org-switcher-label">YOUR ORGANISATIONS<select className="org-switcher" value={selectedOrgId} onChange={e => switchOrganisation(e.target.value)}>{orgs.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="btn btn-outline btn-small side-create" onClick={() => { setShowOrgForm(v => !v); setOrgName('') }}><Plus size={15} /> Add organisation</button><div className="sidebar-section">WORKSPACE</div><button className="side-link active"><LayoutDashboard size={17} /> Overview</button><div className="sidebar-section">YOUR EVENTS <button title="Create event" onClick={() => setShowEventForm(true)}><Plus size={14} /></button></div><div className="side-event-list">{events.map(ev => <button className={`side-event ${activeEvent?.id === ev.id ? 'selected' : ''}`} key={ev.id} onClick={() => { setActiveEvent(ev); setTab('participants') }}><span className="side-event-dot" /> <span>{ev.name}</span><small className={`status-dot ${ev.status}`} /></button>)}</div><button className="btn btn-outline btn-small side-create" onClick={() => setShowEventForm(v => !v)}><Plus size={15} /> New event</button><div className="sidebar-bottom"><div className="account-mini"><span className="account-avatar">{user.email?.slice(0,1).toUpperCase()}</span><span><b>{user.email}</b><small>{role}</small></span></div><button className="side-link signout" onClick={onSignOut}><LogOut size={16} /> Sign out</button></div></aside>
+)}<label className="org-switcher-label">YOUR ORGANISATIONS<select className="org-switcher" value={selectedOrgId} onChange={e => switchOrganisation(e.target.value)}>{orgs.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button className="btn btn-outline btn-small side-create" onClick={() => { setShowOrgForm(v => !v); setOrgName('') }}><Plus size={15} /> Add organisation</button><div className="sidebar-section">WORKSPACE</div><button className="side-link active"><LayoutDashboard size={17} /> Overview</button><div className="sidebar-section">YOUR EVENTS <button title="Create event" onClick={() => setShowEventForm(true)}><Plus size={14} /></button></div><div className="side-event-list">{events.map(ev => <button className={`side-event ${activeEvent?.id === ev.id ? 'selected' : ''}`} key={ev.id} onClick={() => { setActiveEvent(ev); setTab('participants') }}><span className="side-event-dot" /> <span>{ev.name}</span><small className={`status-dot ${ev.status}`} /></button>)}</div><button className="btn btn-outline btn-small side-create" onClick={() => setShowEventForm(v => !v)}><Plus size={15} /> New event</button>
+{orgQuota && (
+  <div className="sidebar-quota-box">
+    <div className="sidebar-quota-header">
+      <span>Free Quota</span>
+      <span className={`sidebar-quota-badge ${orgQuota.is_exhausted ? 'exhausted' : ''}`}>
+        {orgQuota.is_exhausted ? 'Pay-Per-Event' : `${orgQuota.free_remaining} left`}
+      </span>
+    </div>
+    <div className="quota-progress-track">
+      <div
+        className={`quota-progress-fill ${orgQuota.is_exhausted ? 'exhausted' : ''}`}
+        style={{ width: `${Math.min(100, Math.round(((orgQuota.free_used || 0) / Math.max(1, orgQuota.free_limit || 3)) * 100))}%` }}
+      />
+    </div>
+    <div className="sidebar-quota-footer">
+      <span>{orgQuota.free_used || 0} of {orgQuota.free_limit || 3} free used</span>
+      <button
+        type="button"
+        onClick={() => setTab('billing')}
+        style={{ border: 0, background: 'none', color: '#176b4a', fontSize: 10, cursor: 'pointer', padding: 0, fontWeight: 700 }}
+      >
+        Pricing →
+      </button>
+    </div>
+  </div>
+)}
+<div className="sidebar-bottom"><div className="account-mini"><span className="account-avatar">{user.email?.slice(0,1).toUpperCase()}</span><span><b>{user.email}</b><small>{role}</small></span></div><button className="side-link signout" onClick={onSignOut}><LogOut size={16} /> Sign out</button></div></aside>
   <section className="admin-main"><div className="admin-topline"><div><div className="eyebrow">EVENT OPERATIONS / OVERVIEW</div><h1>Good to see you.</h1><p>Manage registrations, payments and event-day check-ins from one place.</p></div><div className="admin-top-actions"><span className="secure-chip"><ShieldCheck size={14} /> Secure workspace</span><button className="icon-btn" onClick={() => { loadWorkspace(); loadRegistrations(activeEvent) }} title="Refresh"><RefreshCw size={17} /></button></div></div>
     {notice && <Notice kind={notice.kind} onClose={() => setNotice(null)}>{notice.text}</Notice>}
     {showOrgForm && <form className="create-event-panel" onSubmit={createOrg}><div className="panel-heading"><div><div className="eyebrow">NEW ORGANISATION</div><h2>Create another organisation</h2></div><button type="button" className="icon-btn" onClick={() => setShowOrgForm(false)}><X size={18} /></button></div><div className="form-grid"><label className="span-2">Organisation / brand name <em>*</em><input required maxLength="100" value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="e.g. Natura’s Trust" /></label></div><div className="panel-footer"><span>You will become the owner of this organisation. Its events and team remain separate.</span><button className="btn btn-primary" type="submit">Create organisation <ArrowRight size={16} /></button></div></form>}
-    {showEventForm && <form className="create-event-panel" onSubmit={createEvent}><div className="panel-heading"><div><div className="eyebrow">NEW EVENT</div><h2>Create an event page</h2></div><button type="button" className="icon-btn" onClick={() => setShowEventForm(false)}><X size={18} /></button></div><div className="form-grid"><label>Event name <em>*</em><input required value={newEvent.name} onChange={e => setNewEvent(v => ({ ...v, name: e.target.value }))} placeholder="e.g. City Charity Run 2027" /></label>
+    {showEventForm && <form className="create-event-panel" onSubmit={createEvent}><div className="panel-heading"><div><div className="eyebrow">NEW EVENT</div><h2>Create an event page</h2></div><button type="button" className="icon-btn" onClick={() => setShowEventForm(false)}><X size={18} /></button></div>
+    {orgQuota?.is_exhausted ? (
+      <div className="billing-alert-banner" style={{ margin: '0 0 16px', padding: '12px 16px' }}>
+        <div className="billing-alert-info">
+          <AlertCircle size={20} color="#b45309" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <strong>Pay-Per-Event Plan: ₹999 Platform Access Fee</strong>
+            <p>Your organisation has used its 3 free events. This event will be saved as a draft and requires a one-time ₹999 platform fee before publishing.</p>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#166534', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <BadgeCheck size={16} color="#166534" />
+        <span><b>Free Plan:</b> Event {(orgQuota?.free_used || 0) + 1} of {orgQuota?.free_limit || 3} is 100% free with full platform features.</span>
+      </div>
+    )}
+    <div className="form-grid"><label>Event name <em>*</em><input required value={newEvent.name} onChange={e => setNewEvent(v => ({ ...v, name: e.target.value }))} placeholder="e.g. City Charity Run 2027" /></label>
 <label>Event tagline <small>Optional short slogan</small><input value={newEvent.tagline} onChange={e => setNewEvent(v => ({ ...v, tagline: e.target.value }))} placeholder="e.g. Run for a greener tomorrow" /></label>
 <label className="branding-upload-field">Event logo picture <small>PNG/JPG or paste link</small>
   <input type="file" accept="image/*" onChange={async e => { const file = e.target.files?.[0]; if (file) { try { const url = await uploadAsset(file, 'event-logos'); setNewEvent(v => ({ ...v, event_logo_url: url })) } catch(err) { alert(err.message) } } }} />
@@ -581,9 +746,32 @@ function Dashboard({ user, onSignOut }) {
   <input value={newEvent.banner_url} onChange={e => setNewEvent(v => ({ ...v, banner_url: e.target.value }))} placeholder="Or paste banner image URL" style={{ marginTop: 4 }} />
 </label><label>Event date<input type="date" value={newEvent.starts_on} onChange={e => setNewEvent(v => ({ ...v, starts_on: e.target.value }))} /></label><label>Venue<input value={newEvent.venue} onChange={e => setNewEvent(v => ({ ...v, venue: e.target.value }))} placeholder="Ground / stadium / location" /></label><label>City<input value={newEvent.city} onChange={e => setNewEvent(v => ({ ...v, city: e.target.value }))} placeholder="City, district" /></label><label>Base fee<input type="number" min="0" value={newEvent.base_fee} onChange={e => setNewEvent(v => ({ ...v, base_fee: e.target.value }))} /></label><label>Currency<select value={newEvent.currency} onChange={e => setNewEvent(v => ({ ...v, currency: e.target.value }))}><option value="INR">INR — Indian Rupee</option><option value="USD">USD — US Dollar</option></select></label><label>UPI ID<input value={newEvent.upi_id} onChange={e => setNewEvent(v => ({ ...v, upi_id: e.target.value }))} placeholder="name@bank" /></label><label>Categories & fees <small>Name|Fee|Minimum age|Maximum age — one per line</small><textarea required rows="3" value={newEvent.categories} onChange={e => setNewEvent(v => ({ ...v, categories: e.target.value }))} placeholder={'5 KM|200|7|15\n10 KM|300|16|99'} /></label><label className="span-2">Short event description<textarea rows="2" value={newEvent.description} onChange={e => setNewEvent(v => ({ ...v, description: e.target.value }))} placeholder="Tell participants what this event is about" /></label><label className="span-2">Payment instructions<textarea rows="2" value={newEvent.payment_instructions} onChange={e => setNewEvent(v => ({ ...v, payment_instructions: e.target.value }))} /></label><label className="span-2" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}><input type="checkbox" checked={Boolean(newEvent.cashfree_enabled)} onChange={e => setNewEvent(v => ({ ...v, cashfree_enabled: e.target.checked }))} /> <span>Enable Cashfree online checkout for this event (UPI, Cards, Netbanking)</span></label></div><div className="panel-footer"><span>New events start as drafts. You choose when to publish.</span><button className="btn btn-primary" type="submit">Create draft event <ArrowRight size={16} /></button></div></form>}
     {events.length === 0 && !showEventForm ? <div className="empty-state large"><CalendarDays size={30} /><b>Your first event starts here.</b><span>Create an event page, configure categories and fees, then publish it when you're ready.</span><button className="btn btn-primary" onClick={() => setShowEventForm(true)}><Plus size={16} /> Create your first event</button></div> : activeEvent && <>
-      <div className="active-event-bar"><div><span className={`status-badge ${activeEvent.status}`}>{activeEvent.status}</span><h2>{activeEvent.name}</h2><div className="active-event-meta"><span><CalendarDays size={14} /> {prettyDate(activeEvent.starts_on)}</span><span><MapPin size={14} /> {[activeEvent.venue, activeEvent.city].filter(Boolean).join(', ') || 'Venue not set'}</span></div></div><div className="event-actions"><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}><ExternalLink size={15} /> Copy registration link</button>{isAdmin && <><button className={`btn btn-small ${activeEvent.cashfree_enabled ? 'btn-outline' : 'btn-quiet'}`} onClick={() => toggleCashfree(activeEvent)} title="Toggle online payments for this event"><Wallet size={14} /> Cashfree: {activeEvent.cashfree_enabled ? 'Active' : 'Off'}</button><button className="btn btn-outline btn-small" onClick={() => toggleRegistration(activeEvent)}>{activeEvent.registration_open ? 'Close registrations' : 'Reopen registrations'}</button><button className={`btn btn-small ${activeEvent.status === 'published' ? 'btn-danger-outline' : 'btn-primary'}`} onClick={() => togglePublish(activeEvent)}>{activeEvent.status === 'published' ? 'Unpublish' : 'Publish event'} <ArrowRight size={15} /></button></>}</div></div>
+      <div className="active-event-bar"><div><span className={`status-badge ${activeEvent.status}`}>{activeEvent.status}</span><h2>{activeEvent.name}</h2><div className="active-event-meta"><span><CalendarDays size={14} /> {prettyDate(activeEvent.starts_on)}</span><span><MapPin size={14} /> {[activeEvent.venue, activeEvent.city].filter(Boolean).join(', ') || 'Venue not set'}</span></div></div><div className="event-actions"><button className="btn btn-outline btn-small" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/e/${activeEvent.slug}`)}><ExternalLink size={15} /> Copy registration link</button>{isAdmin && <><button className={`btn btn-small ${activeEvent.cashfree_enabled ? 'btn-outline' : 'btn-quiet'}`} onClick={() => toggleCashfree(activeEvent)} title="Toggle online payments for this event"><Wallet size={14} /> Cashfree: {activeEvent.cashfree_enabled ? 'Active' : 'Off'}</button><button className="btn btn-outline btn-small" onClick={() => toggleRegistration(activeEvent)}>{activeEvent.registration_open ? 'Close registrations' : 'Reopen registrations'}</button>
+      {activeEvent.billing_type === 'paid' && activeEvent.billing_status !== 'paid' ? (
+        <button className="btn btn-primary btn-small" onClick={() => setShowPaymentModal(true)} style={{ background: '#7e22ce', borderColor: '#7e22ce' }}>
+          <Lock size={14} /> Pay ₹999 to publish
+        </button>
+      ) : (
+        <button className={`btn btn-small ${activeEvent.status === 'published' ? 'btn-danger-outline' : 'btn-primary'}`} onClick={() => togglePublish(activeEvent)}>{activeEvent.status === 'published' ? 'Unpublish' : 'Publish event'} <ArrowRight size={15} /></button>
+      )}</>}</div></div>
+      {activeEvent.billing_type === 'paid' && activeEvent.billing_status !== 'paid' && (
+        <div className="billing-alert-banner">
+          <div className="billing-alert-info">
+            <AlertCircle size={22} color="#b45309" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <strong>₹999 Platform Access Fee Required to Publish</strong>
+              <p>Your organisation has used its 3 free events. Complete the one-time ₹999 payment to publish <b>{activeEvent.name}</b> and accept participant registrations.</p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-primary btn-small" disabled={platformFeeBusy} onClick={() => handlePayPlatformFee(activeEvent)} style={{ background: '#7e22ce', borderColor: '#7e22ce' }}>
+              <Lock size={14} /> {platformFeeBusy ? 'Opening checkout…' : 'Pay ₹999 & Unlock'}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="stats-grid"><StatCard icon={<Users />} label="Total registrations" value={stats.total} detail="All submitted participants" /><StatCard icon={<Clock3 />} label="Awaiting verification" value={stats.pending} detail="Payment review required" /><StatCard icon={<BadgeCheck />} label="Confirmed participants" value={stats.confirmed} detail="Payment verified" /><StatCard icon={<Wallet />} label="Verified collection" value={money(stats.amount, activeEvent.currency)} detail="Based on verified payments" /></div>
-      <div className="dashboard-tabs"><button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')}><Users size={16} /> Participants</button><button className={tab === 'checkin' ? 'active' : ''} onClick={() => setTab('checkin')}><QrCode size={16} /> Event-day check-in</button><button className={tab === 'event' ? 'active' : ''} onClick={() => setTab('event')}><Globe2 size={16} /> Event page</button>{isAdmin && <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}><Users size={16} /> Team</button>}{isAdmin && <button className={tab === 'fundclaims' ? 'active' : ''} onClick={() => setTab('fundclaims')}><Wallet size={16} /> Fund claims</button>}</div>
+      <div className="dashboard-tabs"><button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')}><Users size={16} /> Participants</button><button className={tab === 'checkin' ? 'active' : ''} onClick={() => setTab('checkin')}><QrCode size={16} /> Event-day check-in</button><button className={tab === 'event' ? 'active' : ''} onClick={() => setTab('event')}><Globe2 size={16} /> Event page</button><button className={tab === 'billing' ? 'active' : ''} onClick={() => setTab('billing')}><CreditCard size={16} /> Billing & Quota</button>{isAdmin && <button className={tab === 'team' ? 'active' : ''} onClick={() => setTab('team')}><Users size={16} /> Team</button>}{isAdmin && <button className={tab === 'fundclaims' ? 'active' : ''} onClick={() => setTab('fundclaims')}><Wallet size={16} /> Fund claims</button>}</div>
       {tab === 'participants' && <section className="data-panel"><div className="data-panel-head"><div><h3>Participant registrations</h3><p>Review payment status, confirm entries and manage bib numbers.</p></div><div style={{ display: 'flex', gap: 8 }}><button className="btn btn-outline btn-small" onClick={() => setWhatsappModal(true)} style={{ color: '#0e8b69', borderColor: '#a3d9be', display: 'inline-flex', alignItems: 'center', gap: 6 }}><WhatsAppIcon size={14} /> Message via WhatsApp</button><button className="btn btn-outline btn-small" onClick={exportCsv}><Download size={15} /> Export CSV</button></div></div><div className="table-controls"><div className="search-field"><Search size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, email, bib…" /></div><select value={filter} onChange={e => setFilter(e.target.value)}><option value="all">All registrations</option><option value="pending">Payment pending</option><option value="verified">Payment verified</option><option value="rejected">Rejected</option><option value="checked_in">Checked in</option></select></div>{filteredRows.length ? <div className="table-scroll"><table><thead><tr><th>PARTICIPANT</th><th>CATEGORY</th><th>AMOUNT</th><th>PAYMENT</th><th>BIB / ENTRY</th><th>PROOF</th><th>ACTIONS</th></tr></thead><tbody>{filteredRows.map(row => <tr key={row.id}><td><div className="participant-cell"><b>{row.full_name}</b><small>{row.email}</small><small>{row.phone}</small><small className="code-text">{row.registration_code}</small></div></td><td>{row.category}</td><td><b>{money(row.amount_due, activeEvent.currency)}</b></td><td><span className={`status-badge ${row.payment_status}`}>{row.payment_status}</span></td><td>{row.bib_number ? <span className="bib-chip">#{row.bib_number}</span> : <span className="muted">—</span>}{row.checked_in_at && <small className="checked-label"><CheckCircle2 size={12} /> Checked in</small>}</td><td><button className="proof-link" onClick={() => openProof(row)}><FileImage size={14} /> {row.proof_path ? 'View proof' : 'No file'}</button></td><td><div className="row-actions">
 {row.phone && (
   <a
@@ -671,13 +859,383 @@ function Dashboard({ user, onSignOut }) {
       </div>
     </div>
   </div>
-</>}{tab === 'team' && <TeamPanel members={teamMembers} loading={teamLoading} email={teamEmail} setEmail={setTeamEmail} role={teamRole} setRole={setTeamRole} onSubmit={addTeamMember} />}{tab === 'fundclaims' && <FundClaimsPanel event={activeEvent} events={events} claims={fundClaims} summary={claimSummary} loading={claimsLoading} busy={claimBusy} transferRefs={transferRefs} setTransferRefs={setTransferRefs} onClaim={requestFundClaim} onUpdate={updateFundClaim} />}
+</>}{tab === 'billing' && <BillingPanel org={org} quota={orgQuota} events={events} isAdmin={isAdmin} onPay={handlePayPlatformFee} onViewReceipt={ev => setReceiptModalEvent(ev)} onOpenWaiver={() => setShowAdminWaiverModal(true)} />}{tab === 'team' && <TeamPanel members={teamMembers} loading={teamLoading} email={teamEmail} setEmail={setTeamEmail} role={teamRole} setRole={setTeamRole} onSubmit={addTeamMember} />}{tab === 'fundclaims' && <FundClaimsPanel event={activeEvent} events={events} claims={fundClaims} summary={claimSummary} loading={claimsLoading} busy={claimBusy} transferRefs={transferRefs} setTransferRefs={setTransferRefs} onClaim={requestFundClaim} onUpdate={updateFundClaim} />}
 {whatsappModal && <WhatsAppModal event={activeEvent} registrations={registrations} onClose={() => setWhatsappModal(false)} />}
 {showBrandModal && <OrgBrandModal org={org} onSave={updated => { setOrg(updated); setOrgs(prev => prev.map(o => o.id === updated.id ? updated : o)) }} onClose={() => setShowBrandModal(false)} />}
+{showPaymentModal && <PaymentUnlockModal event={activeEvent} busy={platformFeeBusy} onPay={handlePayPlatformFee} onClose={() => setShowPaymentModal(false)} />}
+{receiptModalEvent && <FeeReceiptModal event={receiptModalEvent} org={org} onClose={() => setReceiptModalEvent(null)} />}
+{showAdminWaiverModal && <AdminWaiverModal events={events} selectedId={waiverTargetEventId} setSelectedId={setWaiverTargetEventId} reason={waiverReason} setReason={setWaiverReason} onGrant={grantWaiver} onClose={() => setShowAdminWaiverModal(false)} />}
     </>}
     <div className="admin-footer-note"><ShieldCheck size={15} /> Each organiser can access only their own workspace data. Keep your login secure.</div>
   </section>
   </main>
+}
+
+function PaymentUnlockModal({ event, busy, onPay, onClose }) {
+  if (!event) return null
+  return (
+    <div className="billing-modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="billing-modal">
+        <div className="billing-modal-head">
+          <div>
+            <div className="eyebrow" style={{ color: '#176b4a' }}>EVENT ACCESS FEE</div>
+            <h2 style={{ margin: '4px 0 0', fontSize: 20 }}>Unlock Event Publishing</h2>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="billing-modal-body">
+          <p style={{ margin: 0, fontSize: 13, color: '#33483b', lineHeight: 1.5 }}>
+            Your organisation has utilized all 3 free events. Unlock <b>{event.name}</b> with the EventFlow one-time platform fee.
+          </p>
+
+          <div className="billing-modal-features">
+            <b style={{ fontSize: 11, textTransform: 'uppercase', color: '#176b4a', letterSpacing: 0.5 }}>Features Included With This Event:</b>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <span>✓ Instant public registration page & shareable QR link</span>
+              <span>✓ Online Cashfree checkout (UPI, Debit/Credit Cards, Netbanking)</span>
+              <span>✓ Participant database, payment verification & CSV data export</span>
+              <span>✓ Fast event-day check-in scanner with QR bib assignment</span>
+              <span>✓ WhatsApp participant messaging support</span>
+              <span>✓ Separate from ticket sales: you retain 100% of participant proceeds</span>
+            </div>
+          </div>
+
+          <div className="billing-price-summary">
+            <div>
+              <small style={{ display: 'block', fontSize: 11, color: '#52695a', fontWeight: 600 }}>EVENTFLOW PLATFORM FEE</small>
+              <strong>₹999 <span style={{ fontSize: 14, fontWeight: 500, color: '#52695a' }}>INR</span></strong>
+            </div>
+            <span style={{ fontSize: 11, color: '#52695a', background: '#e2f2e7', padding: '4px 8px', borderRadius: 6, fontWeight: 700 }}>
+              One-time payment · No subscription
+            </span>
+          </div>
+
+          <small style={{ fontSize: 11, color: '#687e70', lineHeight: 1.4 }}>
+            🔒 Payments processed securely via Cashfree Payments India. Once verified, event publishing and participant registrations are instantly unlocked.
+          </small>
+        </div>
+        <div className="billing-modal-footer">
+          <button className="btn btn-outline" type="button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="btn btn-primary" type="button" disabled={busy} onClick={() => onPay(event)}>
+            {busy ? 'Opening checkout…' : 'PAY ₹999 & UNLOCK EVENT'} <ArrowRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FeeReceiptModal({ event, org, onClose }) {
+  if (!event) return null
+  const feePaid = event.platform_fee_amount || (event.billing_type === 'free' ? 0 : 999)
+  const isFree = event.billing_type === 'free' || event.billing_type === 'complimentary'
+  const receiptNo = `EF-${(event.platform_fee_order_id || event.id).replace(/[^a-zA-Z0-9]/g, '').slice(-8).toUpperCase()}`
+  const dateStr = event.platform_fee_paid_at ? new Date(event.platform_fee_paid_at).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : new Date(event.created_at).toLocaleDateString('en-IN', { dateStyle: 'medium' })
+
+  return (
+    <div className="billing-modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="billing-modal" style={{ maxWidth: 540 }}>
+        <div className="billing-modal-head">
+          <div>
+            <div className="eyebrow">PAYMENT RECEIPT</div>
+            <h2 style={{ margin: '4px 0 0', fontSize: 20 }}>EventFlow Platform Receipt</h2>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="billing-modal-body">
+          <div className="receipt-paper" id="printable-receipt">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, color: '#176b4a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Activity size={18} /> EventFlow
+                </h3>
+                <small style={{ color: '#66776c' }}>Event Operations & Billing Infrastructure</small>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span className={`status-badge ${event.billing_status === 'paid' || isFree ? 'confirmed' : 'pending'}`}>
+                  {isFree ? 'Complimentary / Free' : 'Paid & Confirmed'}
+                </span>
+                <div style={{ fontSize: 10, color: '#66776c', marginTop: 4 }}>Receipt #{receiptNo}</div>
+              </div>
+            </div>
+
+            <div className="receipt-grid">
+              <div>
+                <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>ORGANISATION</span>
+                <b>{org?.name || 'Event Organiser'}</b>
+              </div>
+              <div>
+                <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>DATE</span>
+                <b>{dateStr}</b>
+              </div>
+              <div>
+                <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>EVENT NAME</span>
+                <b>{event.name}</b>
+              </div>
+              <div>
+                <span style={{ color: '#66776c', display: 'block', fontSize: 11 }}>TRANSACTION REF</span>
+                <b style={{ wordBreak: 'break-all', fontSize: 11 }}>{event.platform_fee_order_id || (isFree ? 'FREE_TIER_QUOTA' : 'DIRECT_WAIVER')}</b>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #eef3ef', fontSize: 13 }}>
+              <span>EventFlow Platform Hosting & Registration Setup</span>
+              <b>₹{feePaid.toFixed(2)}</b>
+            </div>
+
+            <div className="receipt-total-row">
+              <span>Total Paid:</span>
+              <strong>₹{feePaid.toFixed(2)} INR</strong>
+            </div>
+
+            <div style={{ marginTop: 16, fontSize: 10, color: '#829588', lineHeight: 1.4 }}>
+              * Event platform fee covers cloud hosting, Cashfree checkout integration, QR verification and dashboard features. Billed in accordance with EventFlow Terms of Service.
+            </div>
+          </div>
+        </div>
+        <div className="billing-modal-footer">
+          <button className="btn btn-outline" type="button" onClick={() => window.print()}>
+            <Printer size={15} /> Print Receipt
+          </button>
+          <button className="btn btn-primary" type="button" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AdminWaiverModal({ events, selectedId, setSelectedId, reason, setReason, onGrant, onClose }) {
+  const unpaidEvents = events.filter(e => e.billing_status !== 'paid' && e.billing_type !== 'free')
+  return (
+    <div className="billing-modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="billing-modal">
+        <div className="billing-modal-head">
+          <div>
+            <div className="eyebrow" style={{ color: '#2563eb' }}>ADMINISTRATIVE OVERRIDE</div>
+            <h2 style={{ margin: '4px 0 0', fontSize: 18 }}>Grant Complimentary Waiver</h2>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="billing-modal-body">
+          <p style={{ margin: 0, fontSize: 12, color: '#4b5563' }}>
+            As an organisation administrator, you can grant a complimentary fee waiver to unlock an event without requiring payment. This action is permanently logged.
+          </p>
+          <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 600 }}>
+            Select Event to Unlock:
+            <select value={selectedId} onChange={e => setSelectedId(e.target.value)} style={{ padding: 8, borderRadius: 8, border: '1px solid #d1d5db' }}>
+              <option value="">-- Choose an unpaid event --</option>
+              {unpaidEvents.map(ev => (
+                <option key={ev.id} value={ev.id}>{ev.name} ({ev.billing_status})</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 600 }}>
+            Waiver Reason / Approval Note:
+            <input
+              type="text"
+              placeholder="e.g. Partner charity run, executive approval"
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              style={{ padding: 8, borderRadius: 8, border: '1px solid #d1d5db' }}
+            />
+          </label>
+        </div>
+        <div className="billing-modal-footer">
+          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button
+            className="btn btn-primary"
+            disabled={!selectedId || !reason.trim()}
+            onClick={() => onGrant(selectedId, reason.trim())}
+          >
+            Grant Waiver & Unlock
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BillingPanel({ org, quota, events, isAdmin, onPay, onViewReceipt, onOpenWaiver }) {
+  const freeUsed = quota?.free_used ?? events.filter(e => e.billing_type === 'free' || !e.billing_type).length
+  const freeLimit = quota?.free_limit ?? (org?.free_event_limit || 3)
+  const freeRemaining = quota?.free_remaining ?? Math.max(0, freeLimit - freeUsed)
+  const paidCount = quota?.paid_events_count ?? events.filter(e => (e.billing_type === 'paid' || e.billing_type === 'complimentary') && e.billing_status === 'paid').length
+  const totalFeesPaid = quota?.total_platform_fees_paid ?? (paidCount * 999)
+  const pendingCount = quota?.pending_events_count ?? events.filter(e => e.billing_status === 'pending').length
+
+  const percentUsed = Math.min(100, Math.round(((freeUsed || 0) / Math.max(1, freeLimit)) * 100))
+
+  return (
+    <section className="data-panel billing-panel">
+      <div className="data-panel-head">
+        <div>
+          <h3>Organisation Billing & Quota</h3>
+          <p>Transparent freemium pricing. First 3 events per organisation are free; ₹999 per event thereafter.</p>
+        </div>
+        <span className="secure-chip"><ShieldCheck size={14} /> Org-level billing</span>
+      </div>
+
+      {/* Quota Progress Banner */}
+      <div className="sidebar-quota-box" style={{ margin: 0, padding: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div>
+            <span style={{ fontSize: 14, fontWeight: 800, color: '#176b4a' }}>Free Event Quota Usage</span>
+            <div style={{ fontSize: 12, color: '#52695a', marginTop: 2 }}>Shared across all members of {org?.name}</div>
+          </div>
+          <span style={{ fontSize: 18, fontWeight: 900, color: quota?.is_exhausted ? '#c0392b' : '#176b4a' }}>
+            {freeUsed} / {freeLimit} <small style={{ fontSize: 12, fontWeight: 600 }}>Free Events Used</small>
+          </span>
+        </div>
+        <div className="quota-progress-track" style={{ height: 10 }}>
+          <div
+            className={`quota-progress-fill ${quota?.is_exhausted ? 'exhausted' : ''}`}
+            style={{ width: `${percentUsed}%` }}
+          />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12, color: '#52695a' }}>
+          <span>{freeRemaining > 0 ? `${freeRemaining} free event${freeRemaining > 1 ? 's' : ''} remaining` : 'Free quota exhausted'}</span>
+          <span>Upcoming event fee: <b>{quota?.is_exhausted ? '₹999 INR' : '₹0 (Free Plan)'}</b></span>
+        </div>
+      </div>
+
+      {/* Stats Summary Grid */}
+      <div className="stats-grid">
+        <StatCard icon={<Ticket />} label="Free events available" value={freeRemaining} detail="Remaining free allowance" />
+        <StatCard icon={<CheckCircle2 />} label="Free events used" value={freeUsed} detail={`Out of ${freeLimit} quota`} />
+        <StatCard icon={<BadgeCheck />} label="Paid events created" value={paidCount} detail="Unlocked via platform fee" />
+        <StatCard icon={<Wallet />} label="Total fees paid" value={`₹${totalFeesPaid}`} detail={`${pendingCount} pending payment`} />
+      </div>
+
+      {/* Pricing Comparison Cards */}
+      <div className="pricing-tiers-grid">
+        <div className="pricing-tier-card">
+          <div>
+            <span className="pricing-tier-tag">ACTIVE / DEFAULT</span>
+            <h4 className="pricing-tier-title">Free Plan</h4>
+            <p style={{ fontSize: 12, color: '#52695a', margin: '4px 0 0' }}>First 3 events per organisation</p>
+            <div className="pricing-tier-price">₹0 <small>no credit card required</small></div>
+            <ul className="pricing-tier-features">
+              <li><Check size={14} color="#176b4a" /> 3 free events forever</li>
+              <li><Check size={14} color="#176b4a" /> Public registration pages</li>
+              <li><Check size={14} color="#176b4a" /> Cashfree online checkout</li>
+              <li><Check size={14} color="#176b4a" /> Participant database & CSV export</li>
+              <li><Check size={14} color="#176b4a" /> QR check-in & WhatsApp links</li>
+            </ul>
+          </div>
+          <div style={{ fontSize: 11, color: '#52695a', borderTop: '1px solid #eef3ef', paddingTop: 10 }}>
+            Status: {quota?.is_exhausted ? 'Exhausted' : `${freeRemaining} of ${freeLimit} free remaining`}
+          </div>
+        </div>
+
+        <div className={`pricing-tier-card ${quota?.is_exhausted ? 'featured' : ''}`}>
+          <div>
+            <span className="pricing-tier-tag" style={{ background: '#f3e8ff', color: '#7e22ce' }}>PAY-AS-YOU-GO</span>
+            <h4 className="pricing-tier-title">Pay-Per-Event Plan</h4>
+            <p style={{ fontSize: 12, color: '#52695a', margin: '4px 0 0' }}>For the 4th event onwards</p>
+            <div className="pricing-tier-price">₹999 <small>per event / one-time</small></div>
+            <ul className="pricing-tier-features">
+              <li><Check size={14} color="#7e22ce" /> Pay only when creating an event</li>
+              <li><Check size={14} color="#7e22ce" /> No monthly or yearly subscription</li>
+              <li><Check size={14} color="#7e22ce" /> Full platform feature access</li>
+              <li><Check size={14} color="#7e22ce" /> Instant publishing upon payment</li>
+              <li><Check size={14} color="#7e22ce" /> Downloadable official tax receipt</li>
+            </ul>
+          </div>
+          <div style={{ fontSize: 11, color: '#52695a', borderTop: '1px solid #eef3ef', paddingTop: 10 }}>
+            {quota?.is_exhausted ? 'Currently active for all new events' : 'Activates automatically after 3 free events'}
+          </div>
+        </div>
+      </div>
+
+      {/* Event Billing History */}
+      <div style={{ marginTop: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <h4 style={{ margin: 0, fontSize: 15, color: '#176b4a' }}>Event Billing History</h4>
+            <small style={{ color: '#52695a' }}>Platform access transactions for this organisation</small>
+          </div>
+          {isAdmin && (
+            <button className="btn btn-outline btn-small" onClick={onOpenWaiver} style={{ fontSize: 11 }}>
+              <Award size={13} /> Grant complimentary waiver
+            </button>
+          )}
+        </div>
+
+        {events.length ? (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>EVENT</th>
+                  <th>CREATED</th>
+                  <th>BILLING PLAN</th>
+                  <th>PLATFORM FEE</th>
+                  <th>STATUS</th>
+                  <th>ORDER / REF</th>
+                  <th>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map(ev => {
+                  const isFree = ev.billing_type === 'free' || !ev.billing_type
+                  const isComplimentary = ev.billing_type === 'complimentary'
+                  const isPaid = ev.billing_status === 'paid'
+                  const isPending = ev.billing_status === 'pending'
+                  const fee = ev.platform_fee_amount || (isFree || isComplimentary ? 0 : 999)
+
+                  return (
+                    <tr key={ev.id}>
+                      <td>
+                        <div className="participant-cell">
+                          <b>{ev.name}</b>
+                          <small className="code-text">{ev.slug}</small>
+                        </div>
+                      </td>
+                      <td>{prettyDate(ev.created_at)}</td>
+                      <td>
+                        <span className={`status-badge ${isFree ? 'confirmed' : isComplimentary ? 'checked_in' : 'draft'}`}>
+                          {isFree ? 'Free Quota' : isComplimentary ? 'Complimentary' : 'Pay-Per-Event'}
+                        </span>
+                      </td>
+                      <td><b>₹{fee.toFixed(2)}</b></td>
+                      <td>
+                        <span className={`status-badge ${isPaid || isFree ? 'confirmed' : isPending ? 'pending' : 'rejected'}`}>
+                          {isFree ? 'Free' : isPaid ? 'Paid' : isPending ? 'Pending' : ev.billing_status}
+                        </span>
+                      </td>
+                      <td>
+                        <small className="code-text" style={{ fontSize: 10 }}>
+                          {ev.platform_fee_order_id ? ev.platform_fee_order_id.slice(-12) : isFree ? 'FREE' : isComplimentary ? 'WAIVER' : '—'}
+                        </small>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {isPending && (
+                            <button className="btn btn-primary btn-small" style={{ fontSize: 10, padding: '4px 8px' }} onClick={() => onPay(ev)}>
+                              Pay ₹999
+                            </button>
+                          )}
+                          <button className="btn btn-outline btn-small" style={{ fontSize: 10, padding: '4px 8px' }} onClick={() => onViewReceipt(ev)}>
+                            <Receipt size={12} /> Receipt
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="table-empty">
+            <Ticket size={24} />
+            <b>No events created yet</b>
+            <span>Your first 3 events are free.</span>
+          </div>
+        )}
+      </div>
+    </section>
+  )
 }
 
 function FundClaimsPanel({ event, events, claims, summary, loading, busy, transferRefs, setTransferRefs, onClaim, onUpdate }) {

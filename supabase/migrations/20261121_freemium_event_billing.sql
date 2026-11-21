@@ -12,14 +12,21 @@ alter table public.organizations
 
 -- 2. Extend events with billing fields
 alter table public.events
-  add column if not exists billing_type text not null default 'free' check (billing_type in ('free', 'paid', 'complimentary')),
+  add column if not exists billing_type text not null default 'free',
   add column if not exists platform_fee_amount numeric(10,2) not null default 0.00,
   add column if not exists platform_fee_currency text not null default 'INR',
-  add column if not exists billing_status text not null default 'free' check (billing_status in ('free', 'pending', 'paid', 'failed')),
+  add column if not exists billing_status text not null default 'free',
   add column if not exists platform_fee_order_id text,
   add column if not exists platform_fee_paid_at timestamptz,
   add column if not exists complimentary_reason text,
   add column if not exists complimentary_granted_by uuid references auth.users(id);
+
+-- Ensure check constraints on events
+alter table public.events drop constraint if exists events_billing_type_check;
+alter table public.events add constraint events_billing_type_check check (billing_type in ('free', 'paid', 'complimentary'));
+
+alter table public.events drop constraint if exists events_billing_status_check;
+alter table public.events add constraint events_billing_status_check check (billing_status in ('free', 'pending', 'paid', 'failed'));
 
 -- Backfill existing events to ensure clean status
 update public.events
@@ -45,7 +52,7 @@ create table if not exists public.platform_fee_orders (
   payment_session_id text,
   amount numeric(10,2) not null default 999.00,
   currency text not null default 'INR',
-  status text not null default 'pending' check (status in ('created', 'pending', 'paid', 'failed', 'cancelled', 'amount_mismatch')),
+  status text not null default 'pending',
   provider_payment_id text,
   provider_payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
@@ -53,6 +60,9 @@ create table if not exists public.platform_fee_orders (
   paid_at timestamptz,
   created_by uuid references auth.users(id)
 );
+
+alter table public.platform_fee_orders drop constraint if exists platform_fee_orders_status_check;
+alter table public.platform_fee_orders add constraint platform_fee_orders_status_check check (status in ('created', 'pending', 'paid', 'failed', 'cancelled', 'amount_mismatch'));
 
 create index if not exists idx_platform_fee_orders_org on public.platform_fee_orders(organization_id);
 create index if not exists idx_platform_fee_orders_event on public.platform_fee_orders(event_id);
@@ -86,7 +96,7 @@ returns trigger
 language plpgsql
 security definer
 set search_path = ''
-as $$
+as $func$
 declare
   v_limit integer := 3;
   v_free_count integer := 0;
@@ -121,7 +131,7 @@ begin
 
   return new;
 end;
-$$;
+$func$;
 
 drop trigger if exists trg_event_billing_assignment on public.events;
 create trigger trg_event_billing_assignment
@@ -135,7 +145,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = ''
-as $$
+as $func$
 declare
   v_limit integer := 3;
   v_free_used integer := 0;
@@ -183,7 +193,7 @@ begin
     'per_event_fee', 999.00
   );
 end;
-$$;
+$func$;
 
 revoke all on function public.get_organization_event_quota(uuid) from public;
 grant execute on function public.get_organization_event_quota(uuid) to authenticated, anon;
@@ -198,7 +208,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = ''
-as $$
+as $func$
 declare
   v_order public.platform_fee_orders%rowtype;
 begin
@@ -240,7 +250,7 @@ begin
 
   return jsonb_build_object('success', true, 'event_id', v_order.event_id, 'status', 'paid');
 end;
-$$;
+$func$;
 
 revoke all on function public.confirm_platform_fee_payment(text, text, numeric) from public, anon;
 grant execute on function public.confirm_platform_fee_payment(text, text, numeric) to authenticated, service_role;
@@ -254,7 +264,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = ''
-as $$
+as $func$
 declare
   v_event public.events%rowtype;
   v_caller uuid := auth.uid();
@@ -293,56 +303,39 @@ begin
 
   return jsonb_build_object('success', true, 'event_id', p_event_id);
 end;
-$$;
+$func$;
 
 revoke all on function public.grant_complimentary_event(uuid, text) from public;
 grant execute on function public.grant_complimentary_event(uuid, text) to authenticated;
 
--- 8. Platform overview for administrators
+-- 8. Platform overview for administrators (language sql, no declare block)
 create or replace function public.get_platform_billing_overview()
 returns jsonb
-language plpgsql
+language sql
 security definer
 set search_path = ''
-as $$
-declare
-  v_total_orgs integer := 0;
-  v_total_events integer := 0;
-  v_free_events integer := 0;
-  v_paid_events integer := 0;
-  v_pending_events integer := 0;
-  v_revenue numeric(10,2) := 0.00;
-  v_recent_tx jsonb;
-begin
-  select count(*) into v_total_orgs from public.organizations;
-  select count(*) into v_total_events from public.events;
-  select count(*) into v_free_events from public.events where billing_type = 'free';
-  select count(*) into v_paid_events from public.events where billing_type in ('paid', 'complimentary') and billing_status = 'paid';
-  select count(*) into v_pending_events from public.events where billing_status = 'pending';
-  select coalesce(sum(amount), 0.00) into v_revenue from public.platform_fee_orders where status = 'paid';
-
-  select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) into v_recent_tx
-  from (
-    select p.id, p.provider_order_id, p.amount, p.currency, p.status, p.created_at, p.paid_at,
-           e.name as event_name, o.name as org_name
-    from public.platform_fee_orders p
-    join public.events e on e.id = p.event_id
-    join public.organizations o on o.id = p.organization_id
-    order by p.created_at desc
-    limit 20
-  ) t;
-
-  return jsonb_build_object(
-    'total_organizations', v_total_orgs,
-    'total_events', v_total_events,
-    'free_events', v_free_events,
-    'paid_events', v_paid_events,
-    'pending_events', v_pending_events,
-    'total_revenue', v_revenue,
-    'recent_transactions', v_recent_tx
+as $func$
+  select jsonb_build_object(
+    'total_organizations', (select count(*) from public.organizations),
+    'total_events', (select count(*) from public.events),
+    'free_events', (select count(*) from public.events where billing_type = 'free'),
+    'paid_events', (select count(*) from public.events where billing_type in ('paid', 'complimentary') and billing_status = 'paid'),
+    'pending_events', (select count(*) from public.events where billing_status = 'pending'),
+    'total_revenue', (select coalesce(sum(amount), 0.00) from public.platform_fee_orders where status = 'paid'),
+    'recent_transactions', (
+      select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb)
+      from (
+        select p.id, p.provider_order_id, p.amount, p.currency, p.status, p.created_at, p.paid_at,
+               e.name as event_name, o.name as org_name
+        from public.platform_fee_orders p
+        join public.events e on e.id = p.event_id
+        join public.organizations o on o.id = p.organization_id
+        order by p.created_at desc
+        limit 20
+      ) t
+    )
   );
-end;
-$$;
+$func$;
 
 grant execute on function public.get_platform_billing_overview() to authenticated;
 

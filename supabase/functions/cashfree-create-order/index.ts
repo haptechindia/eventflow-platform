@@ -17,9 +17,17 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const appId = Deno.env.get("CASHFREE_APP_ID");
   const secret = Deno.env.get("CASHFREE_SECRET_KEY");
-  const siteUrl = Deno.env.get("SITE_URL");
+  const originHeader = req.headers.get("origin") || req.headers.get("referer");
+  let originHost = "";
+  if (originHeader) {
+    try {
+      const u = new URL(originHeader);
+      originHost = `${u.protocol}//${u.host}`;
+    } catch {}
+  }
+  const siteUrl = originHost || Deno.env.get("SITE_URL") || "https://eventflow-platform-iota.vercel.app";
   const environment = Deno.env.get("CASHFREE_ENV") ?? "sandbox";
-  if (!appId || !secret || !siteUrl) return json({ error: "Cashfree server configuration is incomplete." }, 500);
+  if (!appId || !secret) return json({ error: "Cashfree server configuration is incomplete (missing CASHFREE_APP_ID or CASHFREE_SECRET_KEY)." }, 500);
 
   const baseUrl = environment === "production"
     ? "https://api.cashfree.com/pg"
